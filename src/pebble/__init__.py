@@ -7,6 +7,7 @@ from pebble.page import Page
 from pebble.rid import RID
 from pebble.schema import Column, Schema
 from pebble.slotted_page import SlottedPage
+from pebble.table_heap import TableHeap
 from pebble.tuple import Tuple
 from pebble.types import TypeId, Value
 
@@ -20,6 +21,7 @@ __all__ = [
     "RID",
     "Schema",
     "SlottedPage",
+    "TableHeap",
     "Tuple",
     "TypeId",
     "Value",
