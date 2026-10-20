@@ -1,7 +1,7 @@
 """Volcano-style executors: Init / Next pull model.
 
-V1: SeqScan, Insert, Filter, Project.
-LATER: NestedLoopJoin, hash join, etc.
+V1: SeqScan, Insert, Filter, Project, NestedLoopJoin.
+LATER: hash join, external sort, etc.
 """
 
 from __future__ import annotations
@@ -120,3 +120,45 @@ class ProjectExecutor(Executor):
             return None
         values = [tup.get_value(i) for i in self._column_indexes]
         return Tuple(values=values)
+
+
+class NestedLoopJoinExecutor(Executor):
+    """Nested-loop join: for each left tuple, rescan right and emit matches.
+
+    Output tuple = left values concatenated with right values.
+    LATER: hash join for equality predicates.
+    """
+
+    def __init__(
+        self,
+        left: Executor,
+        right: Executor,
+        predicate: Callable[[Tuple, Tuple], bool],
+    ) -> None:
+        self._left = left
+        self._right = right
+        self._predicate = predicate
+        self._left_tuple: Tuple | None = None
+
+    def init(self) -> None:
+        self._left.init()
+        self._left_tuple = None
+
+    def next(self) -> Tuple | None:
+        while True:
+            if self._left_tuple is None:
+                self._left_tuple = self._left.next()
+                if self._left_tuple is None:
+                    return None
+                # Restart right side for this left tuple.
+                self._right.init()
+
+            right_tuple = self._right.next()
+            if right_tuple is None:
+                self._left_tuple = None
+                continue
+
+            if self._predicate(self._left_tuple, right_tuple):
+                return Tuple(
+                    values=list(self._left_tuple.values) + list(right_tuple.values)
+                )
