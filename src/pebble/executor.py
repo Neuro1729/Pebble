@@ -1,13 +1,13 @@
 """Volcano-style executors: Init / Next pull model.
 
-V1: SeqScan + Insert only.
-LATER: Filter, Project, NestedLoopJoin, hash join, etc.
+V1: SeqScan, Insert, Filter, Project.
+LATER: NestedLoopJoin, hash join, etc.
 """
 
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
-from collections.abc import Iterator
+from collections.abc import Callable, Iterator
 
 from pebble.catalog import TableInfo
 from pebble.rid import RID
@@ -81,3 +81,42 @@ class InsertExecutor(Executor):
         self._index += 1
         self._table.heap.insert_tuple(tup)
         return tup
+
+
+class FilterExecutor(Executor):
+    """WHERE: pull from child, keep tuples where predicate is True."""
+
+    def __init__(self, child: Executor, predicate: Callable[[Tuple], bool]) -> None:
+        self._child = child
+        self._predicate = predicate
+
+    def init(self) -> None:
+        self._child.init()
+
+    def next(self) -> Tuple | None:
+        while True:
+            tup = self._child.next()
+            if tup is None:
+                return None
+            if self._predicate(tup):
+                return tup
+
+
+class ProjectExecutor(Executor):
+    """SELECT columns: pull from child, emit a tuple with only chosen column indexes."""
+
+    def __init__(self, child: Executor, column_indexes: list[int]) -> None:
+        if not column_indexes:
+            raise ValueError("column_indexes must be non-empty")
+        self._child = child
+        self._column_indexes = list(column_indexes)
+
+    def init(self) -> None:
+        self._child.init()
+
+    def next(self) -> Tuple | None:
+        tup = self._child.next()
+        if tup is None:
+            return None
+        values = [tup.get_value(i) for i in self._column_indexes]
+        return Tuple(values=values)
