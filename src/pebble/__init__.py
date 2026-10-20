@@ -4,6 +4,7 @@ from pebble.buffer_pool import BufferPoolManager
 from pebble.catalog import Catalog, TableInfo
 from pebble.config import INVALID_PAGE_ID, PAGE_SIZE
 from pebble.disk_manager import DiskManager
+from pebble.executor import Executor, InsertExecutor, SeqScanExecutor, poll
 from pebble.page import Page
 from pebble.rid import RID
 from pebble.schema import Column, Schema
@@ -19,13 +20,17 @@ __all__ = [
     "Catalog",
     "Column",
     "DiskManager",
+    "Executor",
+    "InsertExecutor",
     "Page",
     "RID",
     "Schema",
+    "SeqScanExecutor",
     "SlottedPage",
     "TableHeap",
     "TableInfo",
     "Tuple",
     "TypeId",
     "Value",
+    "poll",
 ]
