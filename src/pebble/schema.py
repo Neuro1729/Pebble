@@ -49,7 +49,9 @@ class Schema:
 #Explantion of the above code - 
 
 
-# This Python code defines a basic structural model for a database or tabular data system. It provides two core classes—**`Column`** (representing an individual column) and **`Schema`** (representing the complete, ordered layout of a table)—to enforce validity and support fast lookups.
+# This Python code defines a basic structural model for a database or tabular data system. 
+#It provides two core classes—**`Column`** (representing an individual column) and 
+#**`Schema`** (representing the complete, ordered layout of a table)—to enforce validity and support fast lookups.
 
 # ---
 
@@ -78,9 +80,11 @@ class Schema:
 # When a `Schema` is instantiated, it automatically validates and indexes the provided columns:
 
 # 1. **Empty Check:** Raises a `ValueError` if no columns are passed (`columns` cannot be empty).
-# 2. **Duplicate Check:** Compares the number of column names against a set of unique names. If duplicates exist, it raises a `ValueError`.
+# 2. **Duplicate Check:** Compares the number of column names against a set of unique names. 
+#        If duplicates exist, it raises a `ValueError`.
 # 3. **Internal Storage (`_columns`):** Stores a copy of the column list to maintain order.
-# 4. **Index Mapping (`_name_to_idx`):** Builds a dictionary mapping column names to their positional index (e.g., `{"id": 0, "name": 1}`). This allows $O(1)$ constant-time lookup of column indices by name.
+# 4. **Index Mapping (`_name_to_idx`):** Builds a dictionary mapping column names to their positional index (e.g., `{"id": 0, "name": 1}`). 
+#      This allows $O(1)$ constant-time lookup of column indices by name.
 
 # ---
 
