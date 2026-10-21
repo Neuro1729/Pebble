@@ -1,7 +1,8 @@
 """Volcano-style executors: Init / Next pull model.
 
 V1: SeqScan, Insert, Filter, Project, NestedLoopJoin.
-LATER: hash join, external sort, etc.
+V2: Insert maintains secondary indexes on the table.
+LATER: IndexScan, hash join, external sort, etc.
 """
 
 from __future__ import annotations
@@ -79,7 +80,9 @@ class InsertExecutor(Executor):
             return None
         tup = self._tuples[self._index]
         self._index += 1
-        self._table.heap.insert_tuple(tup)
+        rid = self._table.heap.insert_tuple(tup)
+        for index in self._table.indexes:
+            index.tree.insert(index.key_from_tuple(tup), rid)
         return tup
 
 
