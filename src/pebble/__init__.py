@@ -1,4 +1,4 @@
-"""Pebble DBMS: V1 building blocks."""
+"""Pebble DBMS: V1 + V2 building blocks."""
 
 from pebble.buffer_pool import BufferPoolManager
 from pebble.catalog import Catalog, TableInfo
@@ -15,6 +15,7 @@ from pebble.executor import (
     poll,
 )
 from pebble.page import Page
+from pebble.page_guard import ReadPageGuard, WritePageGuard
 from pebble.rid import RID
 from pebble.schema import Column, Schema
 from pebble.slotted_page import SlottedPage
@@ -37,6 +38,7 @@ __all__ = [
     "Page",
     "ProjectExecutor",
     "RID",
+    "ReadPageGuard",
     "Schema",
     "SeqScanExecutor",
     "SlottedPage",
@@ -45,5 +47,6 @@ __all__ = [
     "Tuple",
     "TypeId",
     "Value",
+    "WritePageGuard",
     "poll",
 ]

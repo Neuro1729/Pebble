@@ -2,6 +2,7 @@
 
 Catalog (step 6) will remember first_page_id / last_page_id by table name.
 V1: append inserts; full-page → allocate + link. No updates-in-place API yet.
+V2: page guards for pin/unpin (no leaked pins after insert/scan/get).
 LATER: MVCC deletes/updates, free-space maps.
 """
 
@@ -35,10 +36,9 @@ class TableHeap:
     @classmethod
     def create(cls, bpm: BufferPoolManager, schema: Schema) -> TableHeap:
         """Allocate and format the first slotted page for a new table."""
-        page = bpm.new_page()
-        page_id = page.page_id
-        SlottedPage.initialize(page)
-        bpm.unpin_page(page_id, is_dirty=True)
+        with bpm.new_page_write() as guard:
+            page_id = guard.page_id
+            SlottedPage.initialize(guard.page)
         return cls(bpm, schema, first_page_id=page_id, last_page_id=page_id)
 
     @property
@@ -56,34 +56,34 @@ class TableHeap:
     def insert_tuple(self, tuple_: Tuple) -> RID:
         """Append a tuple; allocate and link a new page if the last page is full."""
         data = tuple_.to_bytes(self._schema)
-        page = self._bpm.fetch_page(self._last_page_id)
-        slotted = SlottedPage(page)
-        try:
-            slot_num = slotted.insert_tuple(data)
-        except MemoryError:
-            self._bpm.unpin_page(self._last_page_id, is_dirty=False)
-            return self._insert_on_new_page(data)
+        with self._bpm.fetch_page_write(self._last_page_id) as guard:
+            slotted = SlottedPage(guard.page)
+            try:
+                slot_num = slotted.insert_tuple(data)
+            except MemoryError:
+                guard.mark_clean()
+                overflow = True
+            else:
+                overflow = False
+                rid = RID(page_id=self._last_page_id, slot_num=slot_num)
 
-        self._bpm.unpin_page(self._last_page_id, is_dirty=True)
-        return RID(page_id=self._last_page_id, slot_num=slot_num)
+        if overflow:
+            return self._insert_on_new_page(data)
+        return rid
 
     def get_tuple(self, rid: RID) -> Tuple:
-        page = self._bpm.fetch_page(rid.page_id)
-        try:
-            data = SlottedPage(page).get_tuple(rid.slot_num)
+        with self._bpm.fetch_page_read(rid.page_id) as guard:
+            data = SlottedPage(guard.page).get_tuple(rid.slot_num)
             return Tuple.from_bytes(self._schema, data)
-        finally:
-            self._bpm.unpin_page(rid.page_id, is_dirty=False)
 
     def scan(self) -> Iterator[tuple[RID, Tuple]]:
         """Yield (RID, Tuple) for every non-deleted slot in page-chain order."""
         page_id = self._first_page_id
         while page_id != INVALID_PAGE_ID:
-            page = self._bpm.fetch_page(page_id)
-            slotted = SlottedPage(page)
-            next_page_id = slotted.get_next_page_id()
-            slots = slotted.iter_slots()
-            self._bpm.unpin_page(page_id, is_dirty=False)
+            with self._bpm.fetch_page_read(page_id) as guard:
+                slotted = SlottedPage(guard.page)
+                next_page_id = slotted.get_next_page_id()
+                slots = list(slotted.iter_slots())
 
             for slot_num, data in slots:
                 yield RID(page_id=page_id, slot_num=slot_num), Tuple.from_bytes(
@@ -92,21 +92,18 @@ class TableHeap:
             page_id = next_page_id
 
     def _insert_on_new_page(self, data: bytes) -> RID:
-        new_page = self._bpm.new_page()
-        new_page_id = new_page.page_id
-        SlottedPage.initialize(new_page)
+        with self._bpm.new_page_write() as new_guard:
+            new_page_id = new_guard.page_id
+            SlottedPage.initialize(new_guard.page)
 
-        old_page = self._bpm.fetch_page(self._last_page_id)
-        SlottedPage(old_page).set_next_page_id(new_page_id)
-        self._bpm.unpin_page(self._last_page_id, is_dirty=True)
+            with self._bpm.fetch_page_write(self._last_page_id) as old_guard:
+                SlottedPage(old_guard.page).set_next_page_id(new_page_id)
 
-        slotted = SlottedPage(new_page)
-        try:
-            slot_num = slotted.insert_tuple(data)
-        except MemoryError as exc:
-            self._bpm.unpin_page(new_page_id, is_dirty=True)
-            raise ValueError("tuple larger than an empty page") from exc
+            slotted = SlottedPage(new_guard.page)
+            try:
+                slot_num = slotted.insert_tuple(data)
+            except MemoryError as exc:
+                raise ValueError("tuple larger than an empty page") from exc
 
-        self._bpm.unpin_page(new_page_id, is_dirty=True)
         self._last_page_id = new_page_id
         return RID(page_id=new_page_id, slot_num=slot_num)

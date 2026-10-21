@@ -1,7 +1,8 @@
 """Buffer pool: cache of pages in memory with pin/dirty + FIFO eviction.
 
 V1: sync DiskManager I/O, FIFO replacer.
-LATER: DiskScheduler, ARC/LRU-K, page guards.
+V2 step 1: page guards (fetch_page_read / fetch_page_write / new_page_write).
+LATER: DiskScheduler, ARC/LRU-K.
 """
 
 from __future__ import annotations
@@ -11,6 +12,7 @@ from dataclasses import dataclass, field
 from pebble.config import INVALID_PAGE_ID
 from pebble.disk_manager import DiskManager
 from pebble.page import Page
+from pebble.page_guard import ReadPageGuard, WritePageGuard
 from pebble.replacer import FifoReplacer
 
 
@@ -48,6 +50,10 @@ class BufferPoolManager:
         self._replacer.pin(frame_id)
         return frame.page
 
+    def new_page_write(self) -> WritePageGuard:
+        """Allocate a new page and return a write guard (caller must drop / ``with``)."""
+        return WritePageGuard(self, self.new_page())
+
     def fetch_page(self, page_id: int) -> Page:
         """Return a pinned Page for page_id (load from disk on miss)."""
         if page_id < 0:
@@ -69,6 +75,20 @@ class BufferPoolManager:
         self._page_table[page_id] = frame_id
         self._replacer.pin(frame_id)
         return frame.page
+
+    def fetch_page_read(self, page_id: int) -> ReadPageGuard:
+        """Fetch and pin for read; unpin on guard drop."""
+        return ReadPageGuard(self, self.fetch_page(page_id))
+
+    def fetch_page_write(self, page_id: int) -> WritePageGuard:
+        """Fetch and pin for write; unpin dirty on guard drop."""
+        return WritePageGuard(self, self.fetch_page(page_id))
+
+    def get_pin_count(self, page_id: int) -> int:
+        if page_id not in self._page_table:
+            return 0
+        frame_id = self._page_table[page_id]
+        return self._frames[frame_id].pin_count
 
     def unpin_page(self, page_id: int, is_dirty: bool) -> None:
         if page_id not in self._page_table:
