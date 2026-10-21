@@ -2,15 +2,19 @@
 
 Supported SQL (very limited, case-insensitive keywords):
   CREATE TABLE name (col TYPE, ...)
+  CREATE INDEX name ON table (col)
   INSERT INTO name VALUES (v1, v2), (v3, v4)
   SELECT *|col,... FROM t [WHERE col OP value]
   SELECT *|col,... FROM t1 JOIN t2 ON t1.col = t2.col [WHERE ...]
+
+Planner rule (V2 step 9): single-table ``WHERE indexed_int_col = literal``
+uses IndexScanExecutor; otherwise SeqScan (+ Filter). Joins stay NLJ.
 
 OP: = != < <= > >=
 TYPE: INTEGER | INT | VARCHAR
 Strings: 'single quotes' (use '' for a literal quote).
 
-LATER: real binder/parser/optimizer (BusTub-style).
+LATER: real binder/parser/cost-based optimizer (BusTub-style).
 """
 
 from __future__ import annotations
@@ -20,11 +24,12 @@ from pathlib import Path
 from typing import Callable
 
 from pebble.buffer_pool import BufferPoolManager
-from pebble.catalog import Catalog
+from pebble.catalog import Catalog, IndexInfo, TableInfo
 from pebble.disk_manager import DiskManager
 from pebble.executor import (
     Executor,
     FilterExecutor,
+    IndexScanExecutor,
     InsertExecutor,
     NestedLoopJoinExecutor,
     ProjectExecutor,
@@ -71,7 +76,10 @@ class Database:
 
         upper = statement.upper()
         if upper.startswith("CREATE TABLE"):
-            self._exec_create(statement)
+            self._exec_create_table(statement)
+            return []
+        if upper.startswith("CREATE INDEX"):
+            self._exec_create_index(statement)
             return []
         if upper.startswith("INSERT INTO"):
             return self._exec_insert(statement)
@@ -79,7 +87,7 @@ class Database:
             return self._exec_select(statement)
         raise ValueError(f"unsupported SQL: {statement[:40]}...")
 
-    def _exec_create(self, sql: str) -> None:
+    def _exec_create_table(self, sql: str) -> None:
         match = re.match(
             r"CREATE\s+TABLE\s+(\w+)\s*\((.+)\)\s*$",
             sql,
@@ -98,6 +106,17 @@ class Database:
                 raise ValueError(f"unsupported type: {type_name}")
             columns.append(Column(col_name, _TYPE_MAP[type_name]))
         self._catalog.create_table(name, Schema(columns))
+
+    def _exec_create_index(self, sql: str) -> None:
+        match = re.match(
+            r"CREATE\s+INDEX\s+(\w+)\s+ON\s+(\w+)\s*\((\w+)\)\s*$",
+            sql,
+            flags=re.IGNORECASE | re.DOTALL,
+        )
+        if not match:
+            raise ValueError(f"bad CREATE INDEX: {sql}")
+        index_name, table_name, col_name = match.group(1), match.group(2), match.group(3)
+        self._catalog.create_index(index_name, table_name, [col_name])
 
     def _exec_insert(self, sql: str) -> list[list[Value]]:
         match = re.match(
@@ -131,10 +150,12 @@ class Database:
         where_sql = match.group(8)
 
         left = self._catalog.get_table(left_name)
-        plan: Executor = SeqScanExecutor(left)
 
         if right_name is None:
             name_to_idx = {c.name: i for i, c in enumerate(left.schema.columns)}
+            plan, where_sql = _plan_single_table_scan(
+                left, where_sql.strip() if where_sql is not None else None, name_to_idx
+            )
         else:
             right = self._catalog.get_table(right_name)
             left_idx, right_idx = _resolve_join_indexes(
@@ -148,15 +169,22 @@ class Database:
                 match.group(7),
             )
             plan = NestedLoopJoinExecutor(
-                plan,
+                SeqScanExecutor(left),
                 SeqScanExecutor(right),
                 predicate=lambda l, r, li=left_idx, ri=right_idx: l.get_value(li)
                 == r.get_value(ri),
             )
-            name_to_idx = _join_column_map(left_name, left.schema, right_name, right.schema)
+            name_to_idx = _join_column_map(
+                left_name, left.schema, right_name, right.schema
+            )
+            if where_sql is not None:
+                plan = FilterExecutor(
+                    plan, _compile_where(where_sql.strip(), name_to_idx)
+                )
 
-        if where_sql is not None:
-            plan = FilterExecutor(plan, _compile_where(where_sql.strip(), name_to_idx))
+        if where_sql is not None and right_name is None:
+            # leftover WHERE after a non-indexable predicate on single table
+            plan = FilterExecutor(plan, _compile_where(where_sql, name_to_idx))
 
         if cols_sql != "*":
             col_names = [c.strip() for c in _split_commas(cols_sql)]
@@ -168,6 +196,63 @@ class Database:
             plan = ProjectExecutor(plan, indexes)
 
         return [t.values for t in poll(plan)]
+
+
+def _plan_single_table_scan(
+    table: TableInfo,
+    where_sql: str | None,
+    name_to_idx: dict[str, int],
+) -> tuple[Executor, str | None]:
+    """Dumb rule: equality on an indexed INTEGER column → IndexScan.
+
+    Returns (scan_plan, remaining_where_sql_or_None).
+    """
+    if where_sql is None:
+        return SeqScanExecutor(table), None
+
+    equality = _parse_simple_equality(where_sql)
+    if equality is not None:
+        col_name, literal = equality
+        # Allow table.col or col
+        bare = col_name.split(".")[-1]
+        index = _find_index_on_column(table, bare)
+        if (
+            index is not None
+            and bare in name_to_idx
+            and isinstance(literal, int)
+        ):
+            return (
+                IndexScanExecutor(table, index, equals_key=literal),
+                None,
+            )
+
+    return SeqScanExecutor(table), where_sql
+
+
+def _find_index_on_column(table: TableInfo, column_name: str) -> IndexInfo | None:
+    for index in table.indexes:
+        if len(index.key_columns) == 1 and index.key_columns[0] == column_name:
+            return index
+    return None
+
+
+def _parse_simple_equality(where_sql: str) -> tuple[str, Value] | None:
+    """Return (column, literal) for ``col = literal``, else None."""
+    match = re.match(
+        r"([A-Za-z_][\w.]*)\s*=\s*(.+)$",
+        where_sql.strip(),
+    )
+    if not match:
+        return None
+    col, literal_sql = match.group(1), match.group(2).strip()
+    # Reject compound predicates (no AND/OR in V2 dumb rule).
+    if re.search(r"\bAND\b|\bOR\b", literal_sql, flags=re.IGNORECASE):
+        return None
+    try:
+        literal = _parse_literal(literal_sql)
+    except ValueError:
+        return None
+    return col, literal
 
 
 def _join_column_map(
