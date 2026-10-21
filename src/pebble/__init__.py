@@ -6,6 +6,7 @@ from pebble.catalog import Catalog, TableInfo
 from pebble.config import INVALID_PAGE_ID, PAGE_SIZE
 from pebble.database import Database
 from pebble.disk_manager import DiskManager
+from pebble.disk_scheduler import DiskScheduler
 from pebble.executor import (
     Executor,
     FilterExecutor,
@@ -33,6 +34,7 @@ __all__ = [
     "Column",
     "Database",
     "DiskManager",
+    "DiskScheduler",
     "Executor",
     "FilterExecutor",
     "InsertExecutor",

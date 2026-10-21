@@ -3,7 +3,7 @@
 V1: sync DiskManager I/O, FIFO replacer.
 V2 step 1: page guards (fetch_page_read / fetch_page_write / new_page_write).
 V2 step 2: ArcReplacer (BusTub P1-style).
-LATER: DiskScheduler.
+V2 step 3: DiskScheduler (all page I/O via background worker).
 """
 
 from __future__ import annotations
@@ -13,6 +13,7 @@ from dataclasses import dataclass, field
 from pebble.arc_replacer import ArcReplacer
 from pebble.config import INVALID_PAGE_ID
 from pebble.disk_manager import DiskManager
+from pebble.disk_scheduler import DiskScheduler
 from pebble.page import Page
 from pebble.page_guard import ReadPageGuard, WritePageGuard
 
@@ -29,20 +30,34 @@ class BufferPoolManager:
         if pool_size <= 0:
             raise ValueError("pool_size must be positive")
         self._pool_size = pool_size
-        self._disk = disk_manager
+        self._scheduler = DiskScheduler(disk_manager)
         self._frames = [Frame() for _ in range(pool_size)]
         self._page_table: dict[int, int] = {}  # page_id -> frame_id
         self._free_list = list(range(pool_size))
         self._replacer = ArcReplacer(pool_size)
+        self._closed = False
 
     @property
     def pool_size(self) -> int:
         return self._pool_size
 
+    def close(self) -> None:
+        """Stop the disk scheduler worker (idempotent)."""
+        if self._closed:
+            return
+        self._closed = True
+        self._scheduler.close()
+
+    def __enter__(self) -> BufferPoolManager:
+        return self
+
+    def __exit__(self, *args: object) -> None:
+        self.close()
+
     def new_page(self) -> Page:
         """Allocate a new disk page, load it into a frame, return pinned Page."""
         frame_id = self._get_frame()
-        page_id = self._disk.allocate_page()
+        page_id = self._scheduler.allocate_page()
         frame = self._frames[frame_id]
         frame.page = Page(page_id=page_id)
         frame.pin_count = 1
@@ -70,7 +85,7 @@ class BufferPoolManager:
             return frame.page
 
         frame_id = self._get_frame()
-        page = self._disk.read_page(page_id)
+        page = self._scheduler.read_page(page_id)
         frame = self._frames[frame_id]
         frame.page = page
         frame.pin_count = 1
@@ -112,7 +127,7 @@ class BufferPoolManager:
             raise KeyError(f"page_id {page_id} is not in the buffer pool")
         frame_id = self._page_table[page_id]
         frame = self._frames[frame_id]
-        self._disk.write_page(frame.page)
+        self._scheduler.write_page(frame.page)
         frame.is_dirty = False
 
     def flush_all_pages(self) -> None:
@@ -131,7 +146,7 @@ class BufferPoolManager:
         old_page_id = frame.page.page_id
         if old_page_id != INVALID_PAGE_ID and old_page_id in self._page_table:
             if frame.is_dirty:
-                self._disk.write_page(frame.page)
+                self._scheduler.write_page(frame.page)
             del self._page_table[old_page_id]
 
         frame.page = Page()

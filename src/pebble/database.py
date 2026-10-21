@@ -50,6 +50,7 @@ class Database:
 
     def close(self) -> None:
         self._bpm.flush_all_pages()
+        self._bpm.close()
         self._disk.close()
 
     def __enter__(self) -> Database:

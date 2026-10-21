@@ -1,7 +1,7 @@
 """Sync page I/O against a single database file.
 
 V1: blocking seek + read/write at page_id * PAGE_SIZE.
-LATER: async DiskScheduler (BusTub P1).
+V2: BufferPoolManager talks to DiskManager only via DiskScheduler (one worker).
 """
 
 from __future__ import annotations
