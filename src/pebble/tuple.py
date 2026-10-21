@@ -108,3 +108,60 @@ def _decode_value(type_id: TypeId, data: bytes, offset: int) -> tuple[Value, int
         return data[start:end].decode("utf-8"), end
 
     raise ValueError(f"unsupported type: {type_id}")
+
+
+# High level working if this code 
+
+# Think of this code as a **translator** for a database system.
+
+# In a database, a **Tuple** represents a single row of data (like a row in an Excel spreadsheet). 
+# While Python prefers working with clean objects like numbers (`42`) and text (`"Alice"`), 
+# a hard drive or storage system can only read and write **raw binary bytes** (`0`s and `1`s).
+
+# This module bridges that gap.
+# It takes a row of Python values and converts it into bytes to save to disk, 
+# and reads raw bytes back into Python values when you want to look at them.
+
+# --- The 3 Big Jobs of This Code
+
+# 1. Holding Data in Memory
+
+#     The `Tuple` class acts as a container. 
+#     It simply holds a list of Python values (e.g., `[101, "Alice"]`) and 
+#     lets you look up a value by its column index using `get_value(idx)`.
+
+# 2. Translation (Encoding & Decoding)
+
+#   * Packing (`to_bytes`): Takes every value in the row and 
+#     translates it into raw binary data according to a defined rulebook (the `Schema`).
+
+#   * Unpacking (`from_bytes`): Reads a stream of binary data, cuts it into pieces using the `Schema` 
+#     as a guide, and turns those pieces back into human-readable Python numbers and text.
+
+# 3. Safety Checks (Validation)
+
+#     Before letting bad data into the system, the code makes sure:
+
+#     * You provided the exact number of values the table schema expects.
+#     * Numbers are actually integers and fit within standard limits (32-bit integer limits).
+#     * Text columns actually contain strings.
+
+# --- How Data Types Are Translated
+
+# The code handles two main database types:
+
+# | Data Type            How It Is Saved in Bytes |
+
+# | INTEGER              Converted into a fixed 4-byte block. |
+
+# | VARCHAR (Text)       First writes a 4-byte number indicating text length, 
+#                        immediately followed by the actual text bytes. |
+
+# Because strings can be short or long, storing the length first acts like a bookmark 
+# so the reader knows exactly where the string ends and where the next column begins!
+
+# --- Summary
+
+# This file is the core **serialization engine** for a row of data. 
+# It ensures that data remains strictly valid, translates memory objects into flat byte streams for 
+# storage, and seamlessly reconstructs those byte streams back into Python objects.
