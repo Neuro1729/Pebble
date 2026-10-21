@@ -13,7 +13,7 @@ Internal layout (BusTub-style: size = #children; key[0] unused):
   [ key0.. | page_id0.. ] interleaved as (key i32, child i32) slots
   Lookup ignores key[0]; child i covers keys in [key[i], key[i+1]).
 
-Step 4: layout + binary search + manual tree walk. Split/merge = step 5.
+Step 4: layout + binary search. Step 5: tree ops use remove/set_size/insert_after_child.
 """
 
 from __future__ import annotations
@@ -91,6 +91,19 @@ class BPlusLeafPage:
     def set_next_page_id(self, next_page_id: int) -> None:
         _, size, max_size, _ = self._header()
         self._pack_header(size, max_size, next_page_id)
+
+    def set_size(self, size: int) -> None:
+        if size < 0 or size > self.max_size():
+            raise ValueError(f"leaf size {size} out of range")
+        _, _, max_size, next_id = self._header()
+        self._pack_header(size, max_size, next_id)
+
+    def remove_at(self, index: int) -> None:
+        size = self.size()
+        self._check_index(index, allow_end=False)
+        for i in range(index, size - 1):
+            self.set_at(i, self.key_at(i + 1), self.rid_at(i + 1))
+        self.set_size(size - 1)
 
     def key_at(self, index: int) -> int:
         self._check_index(index, allow_end=False)
@@ -241,6 +254,26 @@ class BPlusInternalPage:
         if size < 0 or size > self.max_size():
             raise ValueError(f"internal size {size} out of range")
         self._pack_header(size, self.max_size())
+
+    def value_index(self, child_page_id: int) -> int:
+        for i in range(self.size()):
+            if self.value_at(i) == child_page_id:
+                return i
+        raise KeyError(f"child page_id {child_page_id} not in internal page")
+
+    def insert_after_child(self, child_index: int, key: int, right_page_id: int) -> None:
+        """Insert separator ``key`` and right child just after ``child_index``."""
+        size = self.size()
+        if size >= self.max_size():
+            raise MemoryError("internal page is full")
+        if child_index < 0 or child_index >= size:
+            raise IndexError(f"child_index {child_index} out of range")
+        self.set_size(size + 1)
+        for j in range(size, child_index + 1, -1):
+            self.set_key_at(j, self.key_at(j - 1))
+            self.set_value_at(j, self.value_at(j - 1))
+        self.set_key_at(child_index + 1, key)
+        self.set_value_at(child_index + 1, right_page_id)
 
     def lookup(self, key: int) -> int:
         """Child page_id for ``key`` (binary search on keys 1..size-1)."""
