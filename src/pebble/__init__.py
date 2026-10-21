@@ -1,5 +1,6 @@
 """Pebble DBMS: V1 + V2 building blocks."""
 
+from pebble.arc_replacer import ArcReplacer
 from pebble.buffer_pool import BufferPoolManager
 from pebble.catalog import Catalog, TableInfo
 from pebble.config import INVALID_PAGE_ID, PAGE_SIZE
@@ -26,6 +27,7 @@ from pebble.types import TypeId, Value
 __all__ = [
     "INVALID_PAGE_ID",
     "PAGE_SIZE",
+    "ArcReplacer",
     "BufferPoolManager",
     "Catalog",
     "Column",

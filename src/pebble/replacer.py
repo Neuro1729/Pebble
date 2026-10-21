@@ -1,7 +1,7 @@
 """FIFO frame replacer for the buffer pool.
 
-V1: oldest unpinned frame is evicted first.
-LATER: replace with CLOCK, LRU-K, or ARC (BusTub P1).
+V1 used this. V2 step 2: BufferPoolManager uses ArcReplacer instead.
+Kept for comparison / tests.
 """
 
 from __future__ import annotations

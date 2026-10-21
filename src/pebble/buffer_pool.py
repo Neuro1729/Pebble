@@ -1,19 +1,20 @@
-"""Buffer pool: cache of pages in memory with pin/dirty + FIFO eviction.
+"""Buffer pool: cache of pages in memory with pin/dirty + ARC eviction.
 
 V1: sync DiskManager I/O, FIFO replacer.
 V2 step 1: page guards (fetch_page_read / fetch_page_write / new_page_write).
-LATER: DiskScheduler, ARC/LRU-K.
+V2 step 2: ArcReplacer (BusTub P1-style).
+LATER: DiskScheduler.
 """
 
 from __future__ import annotations
 
 from dataclasses import dataclass, field
 
+from pebble.arc_replacer import ArcReplacer
 from pebble.config import INVALID_PAGE_ID
 from pebble.disk_manager import DiskManager
 from pebble.page import Page
 from pebble.page_guard import ReadPageGuard, WritePageGuard
-from pebble.replacer import FifoReplacer
 
 
 @dataclass
@@ -32,7 +33,7 @@ class BufferPoolManager:
         self._frames = [Frame() for _ in range(pool_size)]
         self._page_table: dict[int, int] = {}  # page_id -> frame_id
         self._free_list = list(range(pool_size))
-        self._replacer = FifoReplacer()
+        self._replacer = ArcReplacer(pool_size)
 
     @property
     def pool_size(self) -> int:
@@ -47,6 +48,7 @@ class BufferPoolManager:
         frame.pin_count = 1
         frame.is_dirty = False
         self._page_table[page_id] = frame_id
+        self._replacer.record_access(frame_id, page_id)
         self._replacer.pin(frame_id)
         return frame.page
 
@@ -63,6 +65,7 @@ class BufferPoolManager:
             frame_id = self._page_table[page_id]
             frame = self._frames[frame_id]
             frame.pin_count += 1
+            self._replacer.record_access(frame_id, page_id)
             self._replacer.pin(frame_id)
             return frame.page
 
@@ -73,6 +76,7 @@ class BufferPoolManager:
         frame.pin_count = 1
         frame.is_dirty = False
         self._page_table[page_id] = frame_id
+        self._replacer.record_access(frame_id, page_id)
         self._replacer.pin(frame_id)
         return frame.page
 
