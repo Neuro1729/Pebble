@@ -1,6 +1,12 @@
 """Pebble DBMS: V1 + V2 building blocks."""
 
 from pebble.arc_replacer import ArcReplacer
+from pebble.bplus_page import (
+    BPlusInternalPage,
+    BPlusLeafPage,
+    BPlusPageType,
+    bplus_point_lookup,
+)
 from pebble.buffer_pool import BufferPoolManager
 from pebble.catalog import Catalog, TableInfo
 from pebble.config import INVALID_PAGE_ID, PAGE_SIZE
@@ -29,6 +35,9 @@ __all__ = [
     "INVALID_PAGE_ID",
     "PAGE_SIZE",
     "ArcReplacer",
+    "BPlusInternalPage",
+    "BPlusLeafPage",
+    "BPlusPageType",
     "BufferPoolManager",
     "Catalog",
     "Column",
@@ -52,5 +61,6 @@ __all__ = [
     "TypeId",
     "Value",
     "WritePageGuard",
+    "bplus_point_lookup",
     "poll",
 ]
