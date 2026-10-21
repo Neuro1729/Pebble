@@ -7,7 +7,7 @@ from pebble.bplus_page import (
     BPlusPageType,
     bplus_point_lookup,
 )
-from pebble.bplus_tree import BPlusTree
+from pebble.bplus_tree import BPlusTree, BPlusTreeIterator
 from pebble.buffer_pool import BufferPoolManager
 from pebble.catalog import Catalog, TableInfo
 from pebble.config import INVALID_PAGE_ID, PAGE_SIZE
@@ -40,6 +40,7 @@ __all__ = [
     "BPlusLeafPage",
     "BPlusPageType",
     "BPlusTree",
+    "BPlusTreeIterator",
     "BufferPoolManager",
     "Catalog",
     "Column",

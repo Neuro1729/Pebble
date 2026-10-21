@@ -1,11 +1,15 @@
-"""B+Tree index operations on buffer-pool pages (V2 step 5).
+"""B+Tree index operations on buffer-pool pages (V2 steps 5–6).
 
 Unique int32 keys. Insert splits full leaves/internals (copy-up on leaf,
 push-up on internal). Delete is naive: remove from leaf only (no merge /
 redistribute yet; lookup stays correct; nodes may be underfull).
+
+Step 6: BPlusTreeIterator walks leaf slots then sibling leaves in order.
 """
 
 from __future__ import annotations
+
+from collections.abc import Iterator
 
 from pebble.bplus_page import (
     BPlusInternalPage,
@@ -18,6 +22,48 @@ from pebble.bplus_page import (
 from pebble.buffer_pool import BufferPoolManager
 from pebble.config import INVALID_PAGE_ID
 from pebble.rid import RID
+
+
+class BPlusTreeIterator:
+    """In-order leaf scan: slots on a page, then ``next_page_id`` siblings."""
+
+    def __init__(
+        self,
+        bpm: BufferPoolManager,
+        leaf_page_id: int,
+        index: int,
+    ) -> None:
+        self._bpm = bpm
+        self._leaf_page_id = leaf_page_id
+        self._index = index
+        self._done = leaf_page_id == INVALID_PAGE_ID
+
+    def __iter__(self) -> BPlusTreeIterator:
+        return self
+
+    def __next__(self) -> tuple[int, RID]:
+        item = self.next_item()
+        if item is None:
+            raise StopIteration
+        return item
+
+    def next_item(self) -> tuple[int, RID] | None:
+        """Return next (key, RID), or None when exhausted."""
+        while not self._done:
+            with self._bpm.fetch_page_read(self._leaf_page_id) as guard:
+                leaf = BPlusLeafPage(guard.page)
+                if self._index < leaf.size():
+                    key = leaf.key_at(self._index)
+                    rid = leaf.rid_at(self._index)
+                    self._index += 1
+                    return key, rid
+                next_id = leaf.next_page_id()
+            if next_id == INVALID_PAGE_ID:
+                self._done = True
+                return None
+            self._leaf_page_id = next_id
+            self._index = 0
+        return None
 
 
 class BPlusTree:
@@ -101,6 +147,33 @@ class BPlusTree:
                 return False
             leaf.remove_at(idx)
             return True
+
+    def begin(self, start_key: int | None = None) -> BPlusTreeIterator:
+        """Iterator from ``start_key`` (lower_bound) or from the smallest key."""
+        if start_key is None:
+            leaf_id = self._leftmost_leaf_page_id()
+            index = 0
+        else:
+            leaf_id = self._find_leaf_page_id(start_key)
+            with self._bpm.fetch_page_read(leaf_id) as guard:
+                index = BPlusLeafPage(guard.page).lower_bound(start_key)
+        return BPlusTreeIterator(self._bpm, leaf_id, index)
+
+    def scan(self, start_key: int | None = None) -> Iterator[tuple[int, RID]]:
+        """Yield (key, RID) in ascending key order starting at ``start_key``."""
+        return self.begin(start_key)
+
+    def _leftmost_leaf_page_id(self) -> int:
+        page_id = self._root_page_id
+        while True:
+            with self._bpm.fetch_page_read(page_id) as guard:
+                typ = page_type_of(guard.page)
+                if typ is BPlusPageType.LEAF:
+                    return page_id
+                if typ is BPlusPageType.INTERNAL:
+                    page_id = BPlusInternalPage(guard.page).value_at(0)
+                    continue
+                raise ValueError(f"bad b+ page type {typ} at {page_id}")
 
     def _find_leaf_page_id(self, key: int) -> int:
         page_id = self._root_page_id
