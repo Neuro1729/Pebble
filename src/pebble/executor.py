@@ -1,8 +1,8 @@
 """Volcano-style executors: Init / Next pull model.
 
 V1: SeqScan, Insert, Filter, Project, NestedLoopJoin.
-V2: Insert maintains secondary indexes on the table.
-LATER: IndexScan, hash join, external sort, etc.
+V2: Insert maintains indexes; IndexScan uses B+Tree then heap fetch.
+LATER: hash join, external sort, etc.
 """
 
 from __future__ import annotations
@@ -10,7 +10,7 @@ from __future__ import annotations
 from abc import ABC, abstractmethod
 from collections.abc import Callable, Iterator
 
-from pebble.catalog import TableInfo
+from pebble.catalog import IndexInfo, TableInfo
 from pebble.rid import RID
 from pebble.tuple import Tuple
 
@@ -103,6 +103,69 @@ class FilterExecutor(Executor):
                 return None
             if self._predicate(tup):
                 return tup
+
+
+class IndexScanExecutor(Executor):
+    """Scan via secondary index: index keys → RIDs → heap tuples.
+
+    - ``equals_key``: point lookup (unique index).
+    - otherwise: ordered range from ``low_key`` (inclusive, default start)
+      through ``high_key`` (inclusive, default no upper bound).
+    """
+
+    def __init__(
+        self,
+        table: TableInfo,
+        index: IndexInfo,
+        *,
+        equals_key: int | None = None,
+        low_key: int | None = None,
+        high_key: int | None = None,
+    ) -> None:
+        if equals_key is not None and (low_key is not None or high_key is not None):
+            raise ValueError("use equals_key alone, or low_key/high_key, not both")
+        if index.table_name != table.name:
+            raise ValueError(
+                f"index {index.name} is on {index.table_name}, not {table.name}"
+            )
+        self._table = table
+        self._index = index
+        self._equals_key = equals_key
+        self._low_key = low_key
+        self._high_key = high_key
+        self._point_rid: RID | None = None
+        self._point_done = False
+        self._iter: Iterator[tuple[int, RID]] | None = None
+
+    def init(self) -> None:
+        if self._equals_key is not None:
+            self._point_rid = self._index.tree.search(self._equals_key)
+            self._point_done = False
+            self._iter = None
+            return
+        self._point_rid = None
+        self._point_done = True
+        self._iter = self._index.tree.scan(self._low_key)
+
+    def next(self) -> Tuple | None:
+        if self._equals_key is not None:
+            if self._point_done:
+                return None
+            self._point_done = True
+            if self._point_rid is None:
+                return None
+            return self._table.heap.get_tuple(self._point_rid)
+
+        if self._iter is None:
+            raise RuntimeError("IndexScanExecutor.next called before init")
+        while True:
+            try:
+                key, rid = next(self._iter)
+            except StopIteration:
+                return None
+            if self._high_key is not None and key > self._high_key:
+                return None
+            return self._table.heap.get_tuple(rid)
 
 
 class ProjectExecutor(Executor):

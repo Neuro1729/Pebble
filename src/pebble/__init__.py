@@ -17,6 +17,7 @@ from pebble.disk_scheduler import DiskScheduler
 from pebble.executor import (
     Executor,
     FilterExecutor,
+    IndexScanExecutor,
     InsertExecutor,
     NestedLoopJoinExecutor,
     ProjectExecutor,
@@ -50,6 +51,7 @@ __all__ = [
     "DiskScheduler",
     "Executor",
     "FilterExecutor",
+    "IndexScanExecutor",
     "InsertExecutor",
     "NestedLoopJoinExecutor",
     "Page",
