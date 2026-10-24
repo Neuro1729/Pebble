@@ -39,6 +39,8 @@ DONE WHEN:
   - Unit tests assert operator choice without needing full SQL
 """
 
+
+
 from __future__ import annotations
 
 from pebble.catalog import IndexInfo, TableInfo
@@ -50,16 +52,17 @@ def prefer_index_scan(
     column_name: str,
     literal: Value,
 ) -> IndexInfo | None:
-    """Return index to use for ``col = literal``, or None → SeqScan+Filter."""
-    # PSEUDO:
-    #   for idx in table.indexes:
-    #       if idx.key_columns == [column_name] and isinstance(literal, int):
-    #           return idx
-    #   return None
-    raise NotImplementedError("V3 Person A: implement prefer_index_scan")
+    """Return an index for an equality lookup on an indexed INTEGER column."""
+    if not isinstance(literal, int) or isinstance(literal, bool):
+        return None
+
+    for index in table.indexes:
+        if index.key_columns == [column_name]:
+            return index
+
+    return None
 
 
 def choose_join_algorithm(*, is_equality: bool) -> str:
-    """Return ``\"hash\"`` or ``\"nlj\"``."""
-    # PSEUDO: return "hash" if is_equality else "nlj"
-    raise NotImplementedError("V3 Person A: implement choose_join_algorithm")
+    """Return ``"hash"`` for equality joins; otherwise return ``"nlj"``."""
+    return "hash" if is_equality else "nlj"
