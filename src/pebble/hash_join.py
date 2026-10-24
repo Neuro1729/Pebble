@@ -46,14 +46,18 @@ DONE WHEN:
   - init() can be called again (re-build table) for rescan if needed
 """
 
+
+
+
 from __future__ import annotations
 
 from pebble.executor import Executor
+from pebble.hash_table import SimpleHashTable, make_join_key
 from pebble.tuple import Tuple
 
 
 class HashJoinExecutor(Executor):
-    """Equality hash join: build on right, probe with left."""
+    """Equality hash join; output columns are left values followed by right values."""
 
     def __init__(
         self,
@@ -62,13 +66,57 @@ class HashJoinExecutor(Executor):
         left_key_indexes: list[int],
         right_key_indexes: list[int],
     ) -> None:
-        # PSEUDO: store children + key indexes; validate non-empty key lists
-        raise NotImplementedError("V3 Person A: implement HashJoinExecutor.__init__")
+        if not left_key_indexes or not right_key_indexes:
+            raise ValueError("join key indexes must be non-empty")
+        if len(left_key_indexes) != len(right_key_indexes):
+            raise ValueError("left and right join keys must have the same length")
+
+        self._left = left
+        self._right = right
+        self._left_key_indexes = list(left_key_indexes)
+        self._right_key_indexes = list(right_key_indexes)
+
+        self._table = SimpleHashTable()
+        self._current_left: Tuple | None = None
+        self._probe_matches: list[Tuple] = []
+        self._probe_index = 0
+        self._initialized = False
 
     def init(self) -> None:
-        # PSEUDO: build SimpleHashTable from right; then left.init()
-        raise NotImplementedError("V3 Person A: implement HashJoinExecutor.init")
+        """Rebuild the right-side hash table and reset the left-side probe."""
+        self._table.clear()
+        self._current_left = None
+        self._probe_matches = []
+        self._probe_index = 0
+
+        self._right.init()
+        while True:
+            right_tuple = self._right.next()
+            if right_tuple is None:
+                break
+            key = make_join_key(right_tuple, self._right_key_indexes)
+            self._table.insert(key, right_tuple)
+
+        self._left.init()
+        self._initialized = True
 
     def next(self) -> Tuple | None:
-        # PSEUDO: probe-loop as in module docstring
-        raise NotImplementedError("V3 Person A: implement HashJoinExecutor.next")
+        if not self._initialized:
+            raise RuntimeError("HashJoinExecutor.next called before init")
+
+        while True:
+            if self._probe_index < len(self._probe_matches):
+                right_tuple = self._probe_matches[self._probe_index]
+                self._probe_index += 1
+                assert self._current_left is not None
+                return Tuple(
+                    values=list(self._current_left.values) + list(right_tuple.values)
+                )
+
+            self._current_left = self._left.next()
+            if self._current_left is None:
+                return None
+
+            key = make_join_key(self._current_left, self._left_key_indexes)
+            self._probe_matches = self._table.probe(key)
+            self._probe_index = 0
