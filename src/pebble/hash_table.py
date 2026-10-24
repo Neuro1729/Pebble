@@ -59,37 +59,41 @@ HashableKey = Hashable
 
 
 class SimpleHashTable:
-    """In-memory key → list[Tuple] multimap."""
+    """In-memory key-to-tuples multimap.
+
+    ``len(table)`` returns the number of distinct keys.
+    """
 
     def __init__(self) -> None:
-        # PSEUDO: self._buckets: dict[HashableKey, list[Tuple]] = {}
-        raise NotImplementedError("V3 Person A: implement SimpleHashTable.__init__")
+        self._buckets: dict[HashableKey, list[Tuple]] = {}
 
     def insert(self, key: HashableKey, tup: Tuple) -> None:
-        # PSEUDO: self._buckets.setdefault(key, []).append(tup)
-        raise NotImplementedError("V3 Person A: implement SimpleHashTable.insert")
+        """Add a tuple under ``key``."""
+        self._buckets.setdefault(key, []).append(tup)
 
     def probe(self, key: HashableKey) -> list[Tuple]:
-        # PSEUDO: return list(self._buckets.get(key, []))
-        raise NotImplementedError("V3 Person A: implement SimpleHashTable.probe")
+        """Return a copy of the tuples stored under ``key``."""
+        return list(self._buckets.get(key, []))
 
     def keys(self) -> Iterator[HashableKey]:
-        # PSEUDO: yield from self._buckets.keys()
-        raise NotImplementedError("V3 Person A: implement SimpleHashTable.keys")
+        """Iterate over the distinct keys in insertion order."""
+        return iter(self._buckets)
 
     def clear(self) -> None:
-        # PSEUDO: self._buckets.clear()
-        raise NotImplementedError("V3 Person A: implement SimpleHashTable.clear")
+        """Remove all keys and tuples."""
+        self._buckets.clear()
 
     def __len__(self) -> int:
-        # PSEUDO: return len(self._buckets)  # distinct keys
-        raise NotImplementedError("V3 Person A: implement SimpleHashTable.__len__")
+        """Return the number of distinct keys."""
+        return len(self._buckets)
 
 
 def make_join_key(tup: Tuple, key_indexes: list[int]) -> HashableKey:
-    """Extract a hashable probe/build key from a tuple."""
-    # PSEUDO:
-    #   if not key_indexes: raise ValueError
-    #   if len(key_indexes) == 1: return tup.get_value(key_indexes[0])
-    #   return tuple(tup.get_value(i) for i in key_indexes)
-    raise NotImplementedError("V3 Person A: implement make_join_key")
+    """Extract a hashable join key from the tuple's selected columns."""
+    if not key_indexes:
+        raise ValueError("key_indexes must contain at least one column index")
+
+    if len(key_indexes) == 1:
+        return tup.get_value(key_indexes[0])
+
+    return tuple(tup.get_value(index) for index in key_indexes)
