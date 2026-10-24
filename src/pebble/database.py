@@ -10,11 +10,13 @@ Supported SQL (very limited, case-insensitive keywords):
 Planner rule (V2 step 9): single-table ``WHERE indexed_int_col = literal``
 uses IndexScanExecutor; otherwise SeqScan (+ Filter). Joins stay NLJ.
 
+V3 patches (see ``3.md``; do not fight over the same lines):
+  - Person A: equality JOIN → HashJoin; BEGIN/COMMIT/ROLLBACK + TransactionManager
+  - Person B: GROUP BY / ORDER BY / LIMIT / aggs; DELETE / UPDATE + UndoLog
+
 OP: = != < <= > >=
 TYPE: INTEGER | INT | VARCHAR
 Strings: 'single quotes' (use '' for a literal quote).
-
-LATER: real binder/parser/cost-based optimizer (BusTub-style).
 """
 
 from __future__ import annotations

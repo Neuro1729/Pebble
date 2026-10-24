@@ -2,7 +2,11 @@
 
 V1: SeqScan, Insert, Filter, Project, NestedLoopJoin.
 V2: Insert maintains indexes; IndexScan uses B+Tree then heap fetch.
-LATER: hash join, external sort, etc.
+V3: new operators live in separate modules (see ``3.md``):
+  - Person A: ``hash_join.HashJoinExecutor``; txn/WAL modules
+  - Person B: ``sort_executor``, ``aggregate_executor``, ``limit_executor``,
+    ``delete_executor``, ``update_executor``, ``undo_log``
+Keep this file stable; import new executors where needed instead of growing this file.
 """
 
 from __future__ import annotations
