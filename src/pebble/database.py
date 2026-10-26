@@ -46,6 +46,11 @@ from pebble.types import TypeId, Value
 from pebble.hash_join import HashJoinExecutor
 from pebble.optimizer import choose_join_algorithm
 
+
+from pebble.transaction import Transaction
+from pebble.transaction_manager import TransactionManager
+from pebble.wal import LogManager
+
 _TYPE_MAP = {
     "INTEGER": TypeId.INTEGER,
     "INT": TypeId.INTEGER,
@@ -59,10 +64,15 @@ class Database:
         self._bpm = BufferPoolManager(pool_size, self._disk)
         self._catalog = Catalog(self._bpm)
 
+        self._wal = LogManager(Path(f"{db_path}.wal"))
+        self._transaction_manager = TransactionManager(self._wal)
+        self._current_txn: Transaction | None = None
+
     def close(self) -> None:
         self._bpm.flush_all_pages()
         self._bpm.close()
         self._disk.close()
+        self._wal.close()
 
     def __enter__(self) -> Database:
         return self
@@ -81,6 +91,25 @@ class Database:
             raise ValueError("empty SQL")
 
         upper = statement.upper()
+                if upper == "BEGIN":
+            if self._current_txn is not None:
+                raise ValueError("a transaction is already active")
+            self._current_txn = self._transaction_manager.begin()
+            return []
+
+        if upper == "COMMIT":
+            if self._current_txn is None:
+                raise ValueError("no active transaction")
+            self._transaction_manager.commit(self._current_txn)
+            self._current_txn = None
+            return []
+
+        if upper in {"ROLLBACK", "ABORT"}:
+            if self._current_txn is None:
+                raise ValueError("no active transaction")
+            self._transaction_manager.abort(self._current_txn)
+            self._current_txn = None
+            return []
         if upper.startswith("CREATE TABLE"):
             self._exec_create_table(statement)
             return []
@@ -178,21 +207,21 @@ class Database:
                 left_plan = SeqScanExecutor(left)
                 right_plan = SeqScanExecutor(right)
 
-                if choose_join_algorithm(is_equality=True) == "hash":
-                    plan = HashJoinExecutor(
-                        left_plan,
-                        right_plan,
-                        left_key_indexes=[left_idx],
-                        right_key_indexes=[right_idx],
-                    )
-                else:
-                    plan = NestedLoopJoinExecutor(
-                        left_plan,
-                        right_plan,
-                        predicate=lambda l, r, li=left_idx, ri=right_idx: (
-                            l.get_value(li) == r.get_value(ri)
-                        ),
-                    )
+            if choose_join_algorithm(is_equality=True) == "hash":
+                plan = HashJoinExecutor(
+                    left_plan,
+                    right_plan,
+                    left_key_indexes=[left_idx],
+                    right_key_indexes=[right_idx],
+                )
+            else:
+                plan = NestedLoopJoinExecutor(
+                    left_plan,
+                    right_plan,
+                    predicate=lambda l, r, li=left_idx, ri=right_idx: (
+                        l.get_value(li) == r.get_value(ri)
+                    ),
+                )
                 )
             name_to_idx = _join_column_map(
                 left_name, left.schema, right_name, right.schema
