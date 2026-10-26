@@ -42,6 +42,10 @@ from pebble.schema import Column, Schema
 from pebble.tuple import Tuple
 from pebble.types import TypeId, Value
 
+
+from pebble.hash_join import HashJoinExecutor
+from pebble.optimizer import choose_join_algorithm
+
 _TYPE_MAP = {
     "INTEGER": TypeId.INTEGER,
     "INT": TypeId.INTEGER,
@@ -171,11 +175,25 @@ class Database:
                 match.group(7),
             )
             plan = NestedLoopJoinExecutor(
-                SeqScanExecutor(left),
-                SeqScanExecutor(right),
-                predicate=lambda l, r, li=left_idx, ri=right_idx: l.get_value(li)
-                == r.get_value(ri),
-            )
+                left_plan = SeqScanExecutor(left)
+                right_plan = SeqScanExecutor(right)
+
+                if choose_join_algorithm(is_equality=True) == "hash":
+                    plan = HashJoinExecutor(
+                        left_plan,
+                        right_plan,
+                        left_key_indexes=[left_idx],
+                        right_key_indexes=[right_idx],
+                    )
+                else:
+                    plan = NestedLoopJoinExecutor(
+                        left_plan,
+                        right_plan,
+                        predicate=lambda l, r, li=left_idx, ri=right_idx: (
+                            l.get_value(li) == r.get_value(ri)
+                        ),
+                    )
+                )
             name_to_idx = _join_column_map(
                 left_name, left.schema, right_name, right.schema
             )
