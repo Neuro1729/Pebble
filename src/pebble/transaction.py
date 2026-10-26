@@ -67,4 +67,4 @@ class Transaction:
 
     def is_active(self) -> bool:
         # PSEUDO: return self.state == TransactionState.ACTIVE
-        raise NotImplementedError("V3 Person A: implement Transaction.is_active")
+        raise self.state is TransactionState.ACTIVE
