@@ -33,6 +33,15 @@ from pebble.table_heap import TableHeap
 from pebble.tuple import Tuple
 from pebble.types import TypeId, Value
 
+from pebble.hash_join import HashJoinExecutor
+from pebble.hash_table import SimpleHashTable, make_join_key
+from pebble.log_record import LogRecord, LogRecordType
+from pebble.optimizer import choose_join_algorithm, prefer_index_scan
+from pebble.recovery import AnalysisResult, analyze
+from pebble.transaction import IsolationLevel, Transaction, TransactionState
+from pebble.transaction_manager import TransactionManager
+from pebble.wal import LogManager
+
 __all__ = [
     "INVALID_PAGE_ID",
     "PAGE_SIZE",
@@ -69,4 +78,18 @@ __all__ = [
     "WritePageGuard",
     "bplus_point_lookup",
     "poll",
+    "AnalysisResult",
+    "HashJoinExecutor",
+    "IsolationLevel",
+    "LogManager",
+    "LogRecord",
+    "LogRecordType",
+    "SimpleHashTable",
+    "Transaction",
+    "TransactionManager",
+    "TransactionState",
+    "analyze",
+    "choose_join_algorithm",
+    "make_join_key",
+    "prefer_index_scan",
 ]
