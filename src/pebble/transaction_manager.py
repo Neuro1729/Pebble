@@ -36,29 +36,79 @@ DONE WHEN:
   - Double commit / commit-after-abort raises
 """
 
+
+"""Transaction ID and timestamp management."""
+
 from __future__ import annotations
 
-from pebble.transaction import IsolationLevel, Transaction
+from pebble.log_record import LogRecordType
+from pebble.transaction import (
+    IsolationLevel,
+    Transaction,
+    TransactionState,
+)
 
 
 class TransactionManager:
-    """Allocate and finish transactions (single-threaded)."""
+    """Allocate and finish transactions in a single-threaded database."""
 
     def __init__(self, wal: object | None = None) -> None:
-        # PSEUDO: store wal; init counters
-        raise NotImplementedError("V3 Person A: implement TransactionManager.__init__")
+        self._wal = wal
+        self._next_txn_id = 1
+        self._next_ts = 1
+        self._active: dict[int, Transaction] = {}
 
     def begin(
         self,
         isolation: IsolationLevel = IsolationLevel.SNAPSHOT,
     ) -> Transaction:
-        raise NotImplementedError("V3 Person A: implement TransactionManager.begin")
+        txn_id = self._next_txn_id
+        self._next_txn_id += 1
+
+        # Snapshot reads see all transactions committed before this begin.
+        txn = Transaction(
+            txn_id=txn_id,
+            read_ts=self._next_ts - 1,
+            isolation=isolation,
+        )
+
+        if self._wal is not None:
+            self._wal.append(txn_id, LogRecordType.BEGIN)
+
+        self._active[txn_id] = txn
+        return txn
 
     def commit(self, txn: Transaction) -> None:
-        raise NotImplementedError("V3 Person A: implement TransactionManager.commit")
+        self._require_active(txn)
+
+        commit_ts = self._next_ts
+        if self._wal is not None:
+            commit_lsn = self._wal.append(txn.txn_id, LogRecordType.COMMIT)
+            self._wal.flush(commit_lsn)
+
+        txn.commit_ts = commit_ts
+        txn.state = TransactionState.COMMITTED
+        self._next_ts += 1
+        del self._active[txn.txn_id]
 
     def abort(self, txn: Transaction) -> None:
-        raise NotImplementedError("V3 Person A: implement TransactionManager.abort")
+        self._require_active(txn)
+
+        if self._wal is not None:
+            abort_lsn = self._wal.append(txn.txn_id, LogRecordType.ABORT)
+            self._wal.flush(abort_lsn)
+
+        txn.state = TransactionState.ABORTED
+        del self._active[txn.txn_id]
 
     def get(self, txn_id: int) -> Transaction | None:
-        raise NotImplementedError("V3 Person A: implement TransactionManager.get")
+        """Return the active transaction with this ID, if any."""
+        return self._active.get(txn_id)
+
+    def _require_active(self, txn: Transaction) -> None:
+        active_txn = self._active.get(txn.txn_id)
+        if (
+            active_txn is not txn
+            or txn.state is not TransactionState.ACTIVE
+        ):
+            raise ValueError(f"transaction {txn.txn_id} is not active")

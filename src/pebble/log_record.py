@@ -32,8 +32,11 @@ DONE WHEN:
   - LSN / prev_lsn fields present for ARIES-style chains
 """
 
+"""WAL log record types and serialization."""
+
 from __future__ import annotations
 
+import struct
 from dataclasses import dataclass
 from enum import Enum, auto
 
@@ -48,9 +51,13 @@ class LogRecordType(Enum):
     CHECKPOINT = auto()
 
 
+# Header stores: lsn, txn_id, prev_lsn, record type, payload length.
+_HEADER = struct.Struct("<QQQII")
+
+
 @dataclass
 class LogRecord:
-    """One WAL entry (header + optional payload)."""
+    """One WAL entry containing a header and optional byte payload."""
 
     lsn: int
     txn_id: int
@@ -59,10 +66,44 @@ class LogRecord:
     payload: bytes = b""
 
     def to_bytes(self) -> bytes:
-        # PSEUDO: pack header (lsn, txn_id, prev_lsn, type, len) + payload
-        raise NotImplementedError("V3 Person A: implement LogRecord.to_bytes")
+        """Serialize this record into a fixed header followed by its payload."""
+        if min(self.lsn, self.txn_id, self.prev_lsn) < 0:
+            raise ValueError("LSN and transaction IDs must be non-negative")
+        if not isinstance(self.payload, bytes):
+            raise TypeError("payload must be bytes")
+
+        header = _HEADER.pack(
+            self.lsn,
+            self.txn_id,
+            self.prev_lsn,
+            self.rtype.value,
+            len(self.payload),
+        )
+        return header + self.payload
 
     @classmethod
     def from_bytes(cls, data: bytes) -> LogRecord:
-        # PSEUDO: unpack header; slice payload; return LogRecord(...)
-        raise NotImplementedError("V3 Person A: implement LogRecord.from_bytes")
+        """Deserialize one complete record; reject truncated or trailing data."""
+        if len(data) < _HEADER.size:
+            raise ValueError("truncated log record header")
+
+        lsn, txn_id, prev_lsn, type_value, payload_length = _HEADER.unpack_from(data)
+        expected_length = _HEADER.size + payload_length
+        if len(data) != expected_length:
+            raise ValueError(
+                f"log record length mismatch: expected {expected_length}, got {len(data)}"
+            )
+
+        try:
+            rtype = LogRecordType(type_value)
+        except ValueError as exc:
+            raise ValueError(f"unknown log record type: {type_value}") from exc
+
+        payload = data[_HEADER.size:]
+        return cls(
+            lsn=lsn,
+            txn_id=txn_id,
+            prev_lsn=prev_lsn,
+            rtype=rtype,
+            payload=payload,
+        )

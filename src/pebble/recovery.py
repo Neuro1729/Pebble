@@ -53,7 +53,7 @@ from __future__ import annotations
 from collections.abc import Iterable
 from dataclasses import dataclass, field
 
-from pebble.log_record import LogRecord
+from pebble.log_record import LogRecord , LogRecordType
 
 
 @dataclass
@@ -61,20 +61,23 @@ class AnalysisResult:
     committed: set[int] = field(default_factory=set)
     losers: set[int] = field(default_factory=set)
 
-
 def analyze(records: Iterable[LogRecord]) -> AnalysisResult:
-    """V3 Person A: implement analysis pass (no disk redo yet)."""
-    # PSEUDO:
-    #   active = set()
-    #   committed = set()
-    #   for rec in records:
-    #       if BEGIN: active.add(txn)
-    #       if COMMIT: active.discard; committed.add
-    #       if ABORT: active.discard
-    #   losers = active
-    #   return AnalysisResult(committed, losers)
-    raise NotImplementedError("V3 Person A: implement analyze()")
+    """Classify committed transactions and transactions left active in the log."""
+    active: set[int] = set()
+    committed: set[int] = set()
 
+    for record in records:
+        txn_id = record.txn_id
+
+        if record.rtype is LogRecordType.BEGIN:
+            active.add(txn_id)
+        elif record.rtype is LogRecordType.COMMIT:
+            active.discard(txn_id)
+            committed.add(txn_id)
+        elif record.rtype is LogRecordType.ABORT:
+            active.discard(txn_id)
+
+    return AnalysisResult(committed=committed, losers=active)
 
 class RecoveryManager:
     """Full recover() is V4; wire analyze in V3."""
