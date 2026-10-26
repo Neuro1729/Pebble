@@ -41,10 +41,25 @@ class LimitExecutor(Executor):
     """Truncating operator: OFFSET then LIMIT."""
 
     def __init__(self, child: Executor, limit: int, offset: int = 0) -> None:
-        raise NotImplementedError("V3 Person B: implement LimitExecutor.__init__")
+        if limit < 0 or offset < 0:
+            raise ValueError("limit and offset must be non-negative")
+        self._child = child
+        self._limit = limit
+        self._offset = offset
+        self._emitted = 0
 
     def init(self) -> None:
-        raise NotImplementedError("V3 Person B: implement LimitExecutor.init")
+        self._child.init()
+        self._emitted = 0
+        for _ in range(self._offset):
+            if self._child.next() is None:
+                break
 
     def next(self) -> Tuple | None:
-        raise NotImplementedError("V3 Person B: implement LimitExecutor.next")
+        if self._emitted >= self._limit:
+            return None
+        tup = self._child.next()
+        if tup is None:
+            return None
+        self._emitted += 1
+        return tup

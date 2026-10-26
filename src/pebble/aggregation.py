@@ -87,28 +87,89 @@ class AggCall:
 class AggState:
     """Mutable per-group state for a single AggCall."""
 
+    op: AggOp
+    count: int = 0
+    total: int | float = 0
+    min_value: Value | None = None
+    max_value: Value | None = None
+
     def update(self, value: Value | None) -> None:
-        raise NotImplementedError("V3 Person B: implement AggState.update")
+        if self.op is AggOp.COUNT:
+            if value is not None:
+                self.count += 1
+            return
+        if value is None:
+            return
+        if self.op in (AggOp.SUM, AggOp.AVG):
+            if not isinstance(value, (int, float)) or isinstance(value, bool):
+                raise TypeError(f"{self.op.name} requires numeric values")
+            self.total += value
+        if self.op is AggOp.MIN:
+            self.min_value = value if self.min_value is None else min(self.min_value, value)  # type: ignore[type-var]
+        elif self.op is AggOp.MAX:
+            self.max_value = value if self.max_value is None else max(self.max_value, value)  # type: ignore[type-var]
+        self.count += 1
 
     def finalize(self) -> Value:
-        raise NotImplementedError("V3 Person B: implement AggState.finalize")
+        if self.op is AggOp.COUNT:
+            return self.count
+        if self.op is AggOp.SUM:
+            return self.total  # type: ignore[return-value]
+        if self.op is AggOp.MIN:
+            return self.min_value  # type: ignore[return-value]
+        if self.op is AggOp.MAX:
+            return self.max_value  # type: ignore[return-value]
+        if self.op is AggOp.AVG:
+            return None if self.count == 0 else self.total / self.count  # type: ignore[return-value]
+        raise ValueError(f"unsupported aggregate: {self.op}")
 
 
 def make_group_key(tup: Tuple, group_indexes: list[int]) -> HashableKey:
     """Hashable GROUP BY key."""
-    # PSEUDO: empty group_indexes → a constant key (global aggregation)
-    raise NotImplementedError("V3 Person B: implement make_group_key")
+    return tuple(tup.get_value(index) for index in group_indexes)
 
 
 class AggregationHash:
     """Hash-based grouping: one pass over child tuples."""
 
     def __init__(self, group_indexes: list[int], agg_calls: list[AggCall]) -> None:
-        raise NotImplementedError("V3 Person B: implement AggregationHash.__init__")
+        if not agg_calls:
+            raise ValueError("at least one aggregate call is required")
+        self._group_indexes = list(group_indexes)
+        self._agg_calls = list(agg_calls)
+        self._groups: dict[HashableKey, list[AggState]] = {}
+        self._group_values: dict[HashableKey, tuple[Value, ...]] = {}
+        self._seen = False
 
     def add_tuple(self, tup: Tuple) -> None:
-        raise NotImplementedError("V3 Person B: implement AggregationHash.add_tuple")
+        self._seen = True
+        key = make_group_key(tup, self._group_indexes)
+        states = self._groups.setdefault(
+            key, [AggState(call.op) for call in self._agg_calls]
+        )
+        self._group_values.setdefault(
+            key, tuple(tup.get_value(i) for i in self._group_indexes)
+        )
+        for state, call in zip(states, self._agg_calls):
+            if call.op is AggOp.COUNT and call.child_index is None:
+                value = 1
+            else:
+                value = (
+                    None
+                    if call.child_index is None
+                    else tup.get_value(call.child_index)
+                )
+            state.update(value)
 
     def finalize(self) -> list[Tuple]:
         """Return one output tuple per group: group cols + agg results."""
-        raise NotImplementedError("V3 Person B: implement AggregationHash.finalize")
+        if not self._group_indexes and not self._seen and () not in self._groups:
+            self._groups[()] = [AggState(call.op) for call in self._agg_calls]
+            self._group_values[()] = ()
+        return [
+            Tuple(
+                values=list(self._group_values[key])
+                + [state.finalize() for state in states]
+            )
+            for key, states in self._groups.items()
+        ]

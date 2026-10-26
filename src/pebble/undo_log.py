@@ -56,6 +56,7 @@ from dataclasses import dataclass
 from enum import Enum, auto
 
 from pebble.rid import RID
+from pebble.slotted_page import SlottedPage
 from pebble.tuple import Tuple
 
 
@@ -72,6 +73,7 @@ class UndoRecord:
     kind: UndoKind
     before_tuple: Tuple | None
     after_tuple: Tuple | None
+    replacement_rid: RID | None = None
 
 
 @dataclass
@@ -89,20 +91,27 @@ def visible(
     committed_txn_ids: set[int],
 ) -> bool:
     """Return True if this version is visible to a reader at read_ts."""
-    raise NotImplementedError("V3 Person B: implement visible()")
+    return (
+        meta.writer_txn_id in committed_txn_ids
+        and meta.begin_ts <= read_ts < meta.end_ts
+    )
 
 
 class UndoLog:
     """Per-txn undo list for abort rollback."""
 
     def __init__(self) -> None:
-        raise NotImplementedError("V3 Person B: implement UndoLog.__init__")
+        self._by_txn: dict[int, list[UndoRecord]] = {}
 
     def record_insert(self, txn_id: int, rid: RID, after_tuple: Tuple) -> None:
-        raise NotImplementedError("V3 Person B: implement record_insert")
+        self._by_txn.setdefault(txn_id, []).append(
+            UndoRecord(rid, txn_id, UndoKind.INSERT, None, after_tuple)
+        )
 
     def record_delete(self, txn_id: int, rid: RID, before_tuple: Tuple) -> None:
-        raise NotImplementedError("V3 Person B: implement record_delete")
+        self._by_txn.setdefault(txn_id, []).append(
+            UndoRecord(rid, txn_id, UndoKind.DELETE, before_tuple, None)
+        )
 
     def record_update(
         self,
@@ -111,10 +120,61 @@ class UndoLog:
         before_tuple: Tuple,
         after_tuple: Tuple,
     ) -> None:
-        raise NotImplementedError("V3 Person B: implement record_update")
+        self._by_txn.setdefault(txn_id, []).append(
+            UndoRecord(rid, txn_id, UndoKind.UPDATE, before_tuple, after_tuple)
+        )
+
+    def set_replacement_rid(self, txn_id: int, rid: RID) -> None:
+        """Attach the new heap RID used by a delete-plus-insert update."""
+        if not self._by_txn.get(txn_id) or self._by_txn[txn_id][-1].kind is not UndoKind.UPDATE:
+            raise ValueError("no pending update record for transaction")
+        self._by_txn[txn_id][-1].replacement_rid = rid
 
     def records_for(self, txn_id: int) -> list[UndoRecord]:
-        raise NotImplementedError("V3 Person B: implement records_for")
+        return list(self._by_txn.get(txn_id, ()))
 
     def clear_txn(self, txn_id: int) -> None:
-        raise NotImplementedError("V3 Person B: implement clear_txn")
+        self._by_txn.pop(txn_id, None)
+
+    def rollback_txn(self, txn_id: int, table: object) -> None:
+        """Undo changes in reverse order; ``table`` is a TableInfo or TableHeap.
+
+        Updates use a delete-plus-insert heap representation, so restoring a
+        deleted or updated row may assign it a new RID. Indexes are repaired.
+        """
+        records = self._by_txn.get(txn_id, [])
+        heap = getattr(table, "heap", table)
+        indexes = getattr(table, "indexes", [])
+        for record in reversed(records):
+            if record.kind is UndoKind.INSERT:
+                if record.after_tuple is not None:
+                    _mark_deleted(heap, record.rid)
+                    _remove_indexes(indexes, record.after_tuple)
+            elif record.kind is UndoKind.DELETE:
+                if record.before_tuple is not None:
+                    restored = heap.insert_tuple(record.before_tuple)
+                    _insert_indexes(indexes, record.before_tuple, restored)
+            else:  # UPDATE
+                if record.replacement_rid is not None and record.after_tuple is not None:
+                    _mark_deleted(heap, record.replacement_rid)
+                    _remove_indexes(indexes, record.after_tuple)
+                if record.before_tuple is not None:
+                    restored = heap.insert_tuple(record.before_tuple)
+                    _insert_indexes(indexes, record.before_tuple, restored)
+        self.clear_txn(txn_id)
+
+
+def _mark_deleted(heap: object, rid: RID) -> None:
+    bpm = heap._bpm
+    with bpm.fetch_page_write(rid.page_id) as guard:
+        SlottedPage(guard.page).delete_tuple(rid.slot_num)
+
+
+def _remove_indexes(indexes: list[object], tup: Tuple) -> None:
+    for index in indexes:
+        index.tree.delete(index.key_from_tuple(tup))
+
+
+def _insert_indexes(indexes: list[object], tup: Tuple, rid: RID) -> None:
+    for index in indexes:
+        index.tree.insert(index.key_from_tuple(tup), rid)

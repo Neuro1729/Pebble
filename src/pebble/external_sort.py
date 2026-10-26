@@ -48,6 +48,7 @@ DONE WHEN:
 
 from __future__ import annotations
 
+import heapq
 from collections.abc import Iterable, Iterator
 
 from pebble.tuple import Tuple
@@ -59,8 +60,34 @@ def tuple_sort_key(
     descending: list[bool] | None = None,
 ) -> tuple:
     """Comparable key for one tuple."""
-    # PSEUDO: extract values; for DESC wrap in a reverse-aware marker or sort twice
-    raise NotImplementedError("V3 Person B: implement tuple_sort_key")
+    flags = _descending_flags(key_indexes, descending)
+    return tuple(
+        _Descending(tup.get_value(index)) if reverse else tup.get_value(index)
+        for index, reverse in zip(key_indexes, flags)
+    )
+
+
+class _Descending:
+    """Reverse ordering for a single comparable value, without negating strings."""
+
+    __slots__ = ("value",)
+
+    def __init__(self, value: object) -> None:
+        self.value = value
+
+    def __lt__(self, other: _Descending) -> bool:
+        return self.value > other.value  # type: ignore[operator]
+
+    def __eq__(self, other: object) -> bool:
+        return isinstance(other, _Descending) and self.value == other.value
+
+
+def _descending_flags(key_indexes: list[int], descending: list[bool] | None) -> list[bool]:
+    if descending is None:
+        return [False] * len(key_indexes)
+    if len(descending) != len(key_indexes):
+        raise ValueError("descending must have one flag per key column")
+    return list(descending)
 
 
 def sort_in_memory(
@@ -69,8 +96,8 @@ def sort_in_memory(
     descending: list[bool] | None = None,
 ) -> list[Tuple]:
     """Sort a list that fits in memory."""
-    # PSEUDO: return sorted(tuples, key=lambda t: tuple_sort_key(t, key_indexes, descending))
-    raise NotImplementedError("V3 Person B: implement sort_in_memory")
+    _descending_flags(key_indexes, descending)
+    return sorted(tuples, key=lambda tup: tuple_sort_key(tup, key_indexes, descending))
 
 
 class ExternalSorter:
@@ -81,8 +108,9 @@ class ExternalSorter:
         memory_tuple_limit: int = 1024,
         bpm: object | None = None,
     ) -> None:
-        # PSEUDO: store limit; bpm optional for true page spills
-        raise NotImplementedError("V3 Person B: implement ExternalSorter.__init__")
+        if memory_tuple_limit < 1:
+            raise ValueError("memory_tuple_limit must be positive")
+        self._limit = memory_tuple_limit
 
     def sort(
         self,
@@ -90,5 +118,39 @@ class ExternalSorter:
         key_indexes: list[int],
         descending: list[bool] | None = None,
     ) -> Iterator[Tuple]:
-        # PSEUDO: see module docstring
-        raise NotImplementedError("V3 Person B: implement ExternalSorter.sort")
+        _descending_flags(key_indexes, descending)
+        runs: list[list[Tuple]] = []
+        chunk: list[Tuple] = []
+        for tup in tuples:
+            chunk.append(tup)
+            if len(chunk) == self._limit:
+                runs.append(sort_in_memory(chunk, key_indexes, descending))
+                chunk = []
+        if not runs:
+            yield from sort_in_memory(chunk, key_indexes, descending)
+            return
+        if chunk:
+            runs.append(sort_in_memory(chunk, key_indexes, descending))
+
+        # Runs are retained in memory in this MVP; merge them in key order.
+        heap: list[tuple[tuple, int, int, Tuple]] = []
+        for run_no, run in enumerate(runs):
+            if run:
+                heapq.heappush(
+                    heap, (tuple_sort_key(run[0], key_indexes, descending), run_no, 0, run[0])
+                )
+        while heap:
+            _key, run_no, pos, tup = heapq.heappop(heap)
+            yield tup
+            next_pos = pos + 1
+            if next_pos < len(runs[run_no]):
+                next_tuple = runs[run_no][next_pos]
+                heapq.heappush(
+                    heap,
+                    (
+                        tuple_sort_key(next_tuple, key_indexes, descending),
+                        run_no,
+                        next_pos,
+                        next_tuple,
+                    ),
+                )

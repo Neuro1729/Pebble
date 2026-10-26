@@ -44,6 +44,8 @@ from __future__ import annotations
 
 from pebble.catalog import TableInfo
 from pebble.executor import Executor
+from pebble.rid import RID
+from pebble.slotted_page import SlottedPage
 from pebble.tuple import Tuple
 
 
@@ -58,10 +60,41 @@ class DeleteExecutor(Executor):
         undo: object | None = None,
         wal: object | None = None,
     ) -> None:
-        raise NotImplementedError("V3 Person B: implement DeleteExecutor.__init__")
+        self._table = table
+        self._child = child
+        self._txn = txn
+        self._undo = undo
+        self._wal = wal
 
     def init(self) -> None:
-        raise NotImplementedError("V3 Person B: implement DeleteExecutor.init")
+        self._child.init()
 
     def next(self) -> Tuple | None:
-        raise NotImplementedError("V3 Person B: implement DeleteExecutor.next")
+        target = self._child.next()
+        if target is None:
+            return None
+        rid, tup = _resolve_target(self._table, target)
+        txn_id = getattr(self._txn, "txn_id", None)
+        if self._undo is not None and txn_id is not None:
+            self._undo.record_delete(txn_id, rid, tup)
+        with self._table.heap._bpm.fetch_page_write(rid.page_id) as guard:
+            SlottedPage(guard.page).delete_tuple(rid.slot_num)
+        for index in self._table.indexes:
+            index.tree.delete(index.key_from_tuple(tup))
+        if self._txn is not None:
+            self._txn.write_set.append(rid)
+        return tup
+
+
+def _resolve_target(table: TableInfo, target: object) -> tuple[RID, Tuple]:
+    if isinstance(target, tuple) and len(target) == 2 and isinstance(target[0], RID):
+        rid, tup = target
+        return rid, tup
+    if isinstance(target, RID):
+        return target, table.heap.get_tuple(target)
+    if isinstance(target, Tuple):
+        for rid, tup in table.heap.scan():
+            if tup.values == target.values:
+                return rid, tup
+        raise ValueError("target tuple is no longer present in the table")
+    raise TypeError("DML child must yield Tuple, RID, or (RID, Tuple)")

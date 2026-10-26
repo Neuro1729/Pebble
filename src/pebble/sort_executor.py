@@ -34,6 +34,7 @@ DONE WHEN:
 from __future__ import annotations
 
 from pebble.executor import Executor
+from pebble.external_sort import ExternalSorter
 from pebble.tuple import Tuple
 
 
@@ -46,10 +47,32 @@ class SortExecutor(Executor):
         key_indexes: list[int],
         descending: list[bool] | None = None,
     ) -> None:
-        raise NotImplementedError("V3 Person B: implement SortExecutor.__init__")
+        if not key_indexes:
+            raise ValueError("key_indexes must be non-empty")
+        if descending is not None and len(descending) != len(key_indexes):
+            raise ValueError("descending must have one flag per key column")
+        self._child = child
+        self._key_indexes = list(key_indexes)
+        self._descending = None if descending is None else list(descending)
+        self._sorter = ExternalSorter()
+        self._rows: list[Tuple] = []
+        self._index = 0
 
     def init(self) -> None:
-        raise NotImplementedError("V3 Person B: implement SortExecutor.init")
+        self._child.init()
+        self._rows = list(self._sorter.sort(iter(self._child_rows()), self._key_indexes, self._descending))
+        self._index = 0
+
+    def _child_rows(self):
+        while True:
+            tup = self._child.next()
+            if tup is None:
+                return
+            yield tup
 
     def next(self) -> Tuple | None:
-        raise NotImplementedError("V3 Person B: implement SortExecutor.next")
+        if self._index >= len(self._rows):
+            return None
+        tup = self._rows[self._index]
+        self._index += 1
+        return tup

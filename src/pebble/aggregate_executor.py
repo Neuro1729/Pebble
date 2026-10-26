@@ -40,7 +40,7 @@ from pebble.tuple import Tuple
 
 
 class AggregateExecutor(Executor):
-    """Blocking hash-aggregation operator."""
+    """Blocking hash aggregate. Empty global input yields one SQL-like row."""
 
     def __init__(
         self,
@@ -48,10 +48,25 @@ class AggregateExecutor(Executor):
         group_indexes: list[int],
         agg_calls: list[AggCall],
     ) -> None:
-        raise NotImplementedError("V3 Person B: implement AggregateExecutor.__init__")
+        self._child = child
+        self._group_indexes = list(group_indexes)
+        self._agg_calls = list(agg_calls)
+        self._rows: list[Tuple] = []
+        self._index = 0
 
     def init(self) -> None:
-        raise NotImplementedError("V3 Person B: implement AggregateExecutor.init")
+        from pebble.aggregation import AggregationHash
+
+        self._child.init()
+        aggregation = AggregationHash(self._group_indexes, self._agg_calls)
+        while (tup := self._child.next()) is not None:
+            aggregation.add_tuple(tup)
+        self._rows = aggregation.finalize()
+        self._index = 0
 
     def next(self) -> Tuple | None:
-        raise NotImplementedError("V3 Person B: implement AggregateExecutor.next")
+        if self._index >= len(self._rows):
+            return None
+        tup = self._rows[self._index]
+        self._index += 1
+        return tup

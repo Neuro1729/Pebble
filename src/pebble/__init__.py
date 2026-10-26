@@ -24,6 +24,14 @@ from pebble.executor import (
     SeqScanExecutor,
     poll,
 )
+from pebble.aggregate_executor import AggregateExecutor
+from pebble.aggregation import AggCall, AggOp, AggregationHash
+from pebble.delete_executor import DeleteExecutor
+from pebble.external_sort import ExternalSorter, sort_in_memory, tuple_sort_key
+from pebble.limit_executor import LimitExecutor
+from pebble.sort_executor import SortExecutor
+from pebble.undo_log import UndoKind, UndoLog, UndoRecord, VersionMeta, visible
+from pebble.update_executor import UpdateExecutor
 from pebble.page import Page
 from pebble.page_guard import ReadPageGuard, WritePageGuard
 from pebble.rid import RID
@@ -46,6 +54,10 @@ __all__ = [
     "INVALID_PAGE_ID",
     "PAGE_SIZE",
     "ArcReplacer",
+    "AggCall",
+    "AggOp",
+    "AggregateExecutor",
+    "AggregationHash",
     "BPlusInternalPage",
     "BPlusLeafPage",
     "BPlusPageType",
@@ -58,7 +70,9 @@ __all__ = [
     "Database",
     "DiskManager",
     "DiskScheduler",
+    "DeleteExecutor",
     "Executor",
+    "ExternalSorter",
     "FilterExecutor",
     "IndexScanExecutor",
     "InsertExecutor",
@@ -84,12 +98,22 @@ __all__ = [
     "LogManager",
     "LogRecord",
     "LogRecordType",
+    "LimitExecutor",
     "SimpleHashTable",
+    "SortExecutor",
     "Transaction",
     "TransactionManager",
     "TransactionState",
+    "UndoKind",
+    "UndoLog",
+    "UndoRecord",
+    "UpdateExecutor",
+    "VersionMeta",
     "analyze",
     "choose_join_algorithm",
     "make_join_key",
+    "sort_in_memory",
+    "tuple_sort_key",
+    "visible",
     "prefer_index_scan",
 ]
