@@ -32,9 +32,9 @@ DONE WHEN:
   - LSN / prev_lsn fields present for ARIES-style chains
 """
 
-"""WAL log record types and serialization."""
-
 from __future__ import annotations
+
+"""WAL log record types and serialization."""
 
 import struct
 from dataclasses import dataclass

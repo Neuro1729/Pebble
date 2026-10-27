@@ -36,10 +36,9 @@ DONE WHEN:
   - Double commit / commit-after-abort raises
 """
 
+from __future__ import annotations
 
 """Transaction ID and timestamp management."""
-
-from __future__ import annotations
 
 from pebble.log_record import LogRecordType
 from pebble.transaction import (

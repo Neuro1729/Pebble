@@ -91,7 +91,7 @@ class Database:
             raise ValueError("empty SQL")
 
         upper = statement.upper()
-                if upper == "BEGIN":
+        if upper == "BEGIN":
             if self._current_txn is not None:
                 raise ValueError("a transaction is already active")
             self._current_txn = self._transaction_manager.begin()
@@ -203,9 +203,8 @@ class Database:
                 match.group(6),
                 match.group(7),
             )
-            plan = NestedLoopJoinExecutor(
-                left_plan = SeqScanExecutor(left)
-                right_plan = SeqScanExecutor(right)
+            left_plan = SeqScanExecutor(left)
+            right_plan = SeqScanExecutor(right)
 
             if choose_join_algorithm(is_equality=True) == "hash":
                 plan = HashJoinExecutor(
@@ -221,7 +220,6 @@ class Database:
                     predicate=lambda l, r, li=left_idx, ri=right_idx: (
                         l.get_value(li) == r.get_value(ri)
                     ),
-                )
                 )
             name_to_idx = _join_column_map(
                 left_name, left.schema, right_name, right.schema

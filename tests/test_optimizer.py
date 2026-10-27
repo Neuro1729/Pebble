@@ -9,7 +9,6 @@ PSEUDOCODE CASES
 3. prefer_index_scan returns IndexInfo when indexed INTEGER col
 4. prefer_index_scan returns None when no index
 """
-"""Tests for rule-based optimizer helpers."""
 
 from __future__ import annotations
 

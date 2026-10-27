@@ -42,10 +42,9 @@ DONE WHEN:
   - COMMIT path can flush up to commit LSN
 """
 
+from __future__ import annotations
 
 """Append-only write-ahead log with explicit flushing."""
-
-from __future__ import annotations
 
 import os
 import struct

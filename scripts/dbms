@@ -1,0 +1,13 @@
+#!/bin/sh
+set -eu
+
+SCRIPT_DIR=$(CDPATH= cd "$(dirname "$0")" && pwd)
+REPO_ROOT=$(CDPATH= cd "$SCRIPT_DIR/.." && pwd)
+EXECUTABLE="$REPO_ROOT/build/debug/bin/dbms"
+
+if [ ! -x "$EXECUTABLE" ]; then
+  printf 'Pebble DBMS is not built yet. Run: make -C "%s" debug\n' "$REPO_ROOT" >&2
+  exit 127
+fi
+
+exec "$EXECUTABLE" "$@"
