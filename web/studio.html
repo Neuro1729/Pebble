@@ -1,0 +1,429 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="theme-color" content="#f4f5f2">
+    <title>Pebble Studio</title>
+    <style>
+      :root {
+        color-scheme: light;
+        --ink: #1e2825;
+        --muted: #75817c;
+        --line: #e6e9e5;
+        --paper: #fff;
+        --canvas: #f4f5f2;
+        --green: #1f795b;
+        --green-soft: #e7f3ed;
+        --amber: #b77928;
+        --red: #bd5b50;
+        --mono: "SFMono-Regular", Consolas, "Liberation Mono", monospace;
+        font-family: Inter, ui-sans-serif, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      }
+      * { box-sizing: border-box; }
+      body { margin: 0; background: var(--canvas); color: var(--ink); min-width: 320px; }
+      button, textarea, input { font: inherit; }
+      .topbar { height: 66px; display: flex; align-items: center; justify-content: space-between; padding: 0 5.4vw; border-bottom: 1px solid #e9ebe8; background: rgba(255,255,255,.76); }
+      .brand { display: flex; align-items: center; gap: 11px; font-size: 15px; font-weight: 700; letter-spacing: -.02em; }
+      .brand-mark { height: 30px; width: 30px; display: grid; place-items: center; color: white; background: var(--green); border-radius: 9px; box-shadow: 0 4px 10px #1f795b2c; }
+      .top-right { display: flex; align-items: center; gap: 20px; color: #67736e; font-size: 12px; }
+      .top-actions { display: flex; align-items: center; gap: 11px; }
+      .theme-toggle { display: inline-flex; align-items: center; gap: 7px; padding: 7px 10px; border: 1px solid var(--line); border-radius: 999px; color: #52615a; background: white; font-size: 10px; font-weight: 620; cursor: pointer; transition: background .15s, border-color .15s; }
+      .theme-toggle:hover { background: #f8faf8; border-color: #cdd7d0; }
+      .theme-toggle svg { color: var(--green); }
+      .local-tag, .live-tag { display: inline-flex; align-items: center; gap: 7px; border: 1px solid #e4e8e3; background: #fff; border-radius: 999px; padding: 7px 10px; color: #51605a; font-size: 11px; font-weight: 600; }
+      .dot { width: 7px; height: 7px; border-radius: 50%; background: #36a474; box-shadow: 0 0 0 3px #36a47420; }
+      main { width: min(1392px, 92vw); margin: 43px auto 64px; }
+      .intro { display: flex; align-items: flex-end; justify-content: space-between; gap: 24px; margin-bottom: 28px; }
+      .eyebrow { color: var(--green); font-size: 10px; line-height: 1.4; letter-spacing: .13em; font-weight: 750; text-transform: uppercase; }
+      h1 { margin: 8px 0 8px; font-size: clamp(27px, 3vw, 38px); line-height: 1.08; letter-spacing: -.045em; font-weight: 690; }
+      .intro p { margin: 0; color: var(--muted); font-size: 14px; line-height: 1.6; }
+      .db-chip { display: flex; align-items: center; gap: 9px; white-space: nowrap; padding: 10px 12px; border: 1px solid var(--line); border-radius: 10px; background: white; color: #5d6a64; font-size: 11px; }
+      .db-chip svg { color: var(--green); }
+      .layout { display: grid; grid-template-columns: minmax(0, 1fr) 342px; align-items: start; gap: 19px; }
+      .main-column { display: grid; gap: 18px; min-width: 0; }
+      .panel { background: var(--paper); border: 1px solid #e7eae6; border-radius: 14px; box-shadow: 0 4px 14px #1e282506; }
+      .workload { padding: 21px 22px 22px; }
+      .panel-heading { display: flex; justify-content: space-between; align-items: flex-start; gap: 16px; }
+      .section-title { margin: 0; font-size: 14px; font-weight: 680; letter-spacing: -.015em; }
+      .section-sub { margin: 5px 0 0; color: var(--muted); font-size: 11px; line-height: 1.5; }
+      .row-count { text-align: right; }
+      .row-count strong { display: block; color: var(--ink); font-size: 17px; font-weight: 680; font-variant-numeric: tabular-nums; }
+      .row-count span { color: var(--muted); font-size: 10px; }
+      .batch-size { display: flex; align-items: center; gap: 9px; margin-top: 17px; color: #627068; font-size: 10px; }
+      .batch-size label { font-weight: 650; }
+      .batch-size input { width: 112px; height: 34px; padding: 0 10px; outline: none; border: 1px solid var(--line); border-radius: 8px; color: var(--ink); background: var(--paper); font: 12px var(--mono); font-variant-numeric: tabular-nums; }
+      .batch-size input:focus { border-color: #70b695; box-shadow: 0 0 0 3px #52a98120; }
+      .batch-size small { color: #929d96; font-size: 9px; }
+      .action-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px; margin-top: 19px; }
+      .action { min-height: 79px; display: flex; align-items: center; gap: 12px; padding: 13px; text-align: left; background: white; border: 1px solid var(--line); border-radius: 10px; cursor: pointer; transition: border-color .15s, background .15s, transform .15s; }
+      .action:hover:not(:disabled) { border-color: #9dcdb8; background: #fbfdfb; transform: translateY(-1px); }
+      .action:disabled { cursor: wait; opacity: .53; }
+      .action-icon { width: 34px; height: 34px; flex: none; display: grid; place-items: center; border-radius: 9px; color: var(--green); background: var(--green-soft); }
+      .action.update .action-icon { color: #aa7529; background: #fbf1df; }
+      .action.delete .action-icon { color: #b4584e; background: #faeae8; }
+      .action strong { display: block; font-size: 11px; font-weight: 680; }
+      .action small { display: block; margin-top: 4px; color: var(--muted); font-size: 10px; }
+      .hint { display: flex; align-items: center; gap: 7px; margin: 13px 0 0; color: #8b9690; font-size: 10px; }
+      .hint svg { flex: none; }
+      .sql-panel { overflow: hidden; }
+      .sql-head { display: flex; justify-content: space-between; align-items: center; gap: 16px; padding: 17px 20px 14px; }
+      .sql-label { display: flex; align-items: center; gap: 8px; }
+      .sql-label svg { color: var(--green); }
+      .sql-editor { display: block; width: 100%; min-height: 157px; padding: 17px 20px; resize: vertical; outline: none; color: #d6e2dc; background: #202a27; border: 0; border-top: 1px solid #303a37; border-bottom: 1px solid #303a37; font: 12px/1.7 var(--mono); tab-size: 2; }
+      .sql-editor::placeholder { color: #86918b; }
+      .sql-editor:focus { box-shadow: inset 3px 0 #58b88e; }
+      .sql-foot { min-height: 52px; display: flex; align-items: center; justify-content: space-between; gap: 15px; padding: 10px 20px; }
+      .keyboard-note { color: #8b9690; font-size: 10px; }
+      kbd { padding: 2px 5px; color: #67736e; background: #f3f5f2; border: 1px solid #e4e8e3; border-radius: 4px; font: 9px var(--mono); }
+      .run-button { display: inline-flex; align-items: center; justify-content: center; gap: 8px; border: 0; padding: 9px 13px; border-radius: 8px; color: white; background: var(--green); font-size: 11px; font-weight: 650; cursor: pointer; }
+      .run-button:hover:not(:disabled) { background: #176548; }
+      .run-button:disabled { opacity: .6; cursor: wait; }
+      .output-wrap { display: none; border-top: 1px solid var(--line); }
+      .output-wrap.visible { display: block; }
+      .output-header { display: flex; align-items: center; justify-content: space-between; padding: 11px 20px; color: #738079; font-size: 10px; font-weight: 650; }
+      .output-status { display: flex; align-items: center; gap: 6px; }
+      .output-status.success { color: var(--green); }
+      .output-status.error { color: var(--red); }
+      .output-content { max-height: 300px; overflow: auto; padding: 0 20px 17px; color: #53615b; white-space: pre-wrap; overflow-wrap: anywhere; font: 11px/1.65 var(--mono); }
+      .output-content:empty { display: none; }
+      .right-column { position: sticky; top: 16px; }
+      .telemetry { padding: 19px 18px 17px; }
+      .telemetry-heading { display: flex; justify-content: space-between; align-items: center; }
+      .telemetry-heading .section-title { display: flex; align-items: center; gap: 8px; }
+      .telemetry-heading .section-title svg { color: var(--green); }
+      .live-tag { padding: 5px 8px; color: var(--green); border-color: #dcece3; background: #f8fcf9; font-size: 9px; }
+      .system-meta { display: grid; grid-template-columns: 1fr 1fr; gap: 9px; margin: 17px 0; }
+      .meta-cell { min-width: 0; padding: 10px; border-radius: 9px; background: #f6f7f5; }
+      .meta-label { display: block; margin-bottom: 5px; color: #89948e; text-transform: uppercase; letter-spacing: .08em; font-size: 8px; font-weight: 750; }
+      .meta-value { display: block; overflow: hidden; color: #3a4842; text-overflow: ellipsis; white-space: nowrap; font-size: 11px; font-weight: 620; }
+      .cpu-model { padding: 0 1px 13px; color: #6f7b75; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 10px; }
+      .metric { margin: 0 0 15px; }
+      .metric-top { display: flex; justify-content: space-between; align-items: baseline; gap: 10px; margin-bottom: 7px; }
+      .metric-name { display: flex; align-items: center; gap: 7px; color: #66736d; font-size: 10px; font-weight: 590; }
+      .metric-name svg { color: #85918b; }
+      .metric-value { color: var(--ink); font: 11px var(--mono); font-variant-numeric: tabular-nums; }
+      .metric-detail { margin-top: 5px; color: #909a94; font-size: 9px; }
+      .bar { height: 5px; overflow: hidden; border-radius: 10px; background: #edf0ed; }
+      .bar > span { display: block; width: 0; height: 100%; border-radius: inherit; background: #52a981; transition: width .4s ease; }
+      .bar.memory > span { background: #7292c6; }
+      .bar.process > span { background: #3c9b77; }
+      .bar.disk > span { background: #bf9250; }
+      .chart-block { margin: 18px -2px 0; padding-top: 15px; border-top: 1px solid #eef0ed; }
+      .chart-title { display: flex; justify-content: space-between; align-items: center; margin: 0 1px 9px; color: #64716b; font-size: 10px; font-weight: 620; }
+      .chart-title span:last-child { color: #99a29d; font-size: 9px; font-weight: 450; }
+      #chart { display: block; width: 100%; height: 122px; }
+      .legend { display: flex; justify-content: center; gap: 16px; margin-top: 2px; color: #7b8781; font-size: 9px; }
+      .legend span { display: flex; align-items: center; gap: 5px; }
+      .legend i { display: inline-block; width: 7px; height: 7px; border-radius: 50%; background: #39a778; }
+      .legend .ram-dot { background: #718fc5; }
+      .disk-summary { margin-top: 14px; padding-top: 13px; border-top: 1px solid #eef0ed; }
+      .disk-title { display: flex; justify-content: space-between; color: #66736d; font-size: 10px; }
+      .disk-title strong { color: #47554e; font-weight: 620; }
+      .disk-label { margin: 4px 0 8px; overflow: hidden; color: #929c96; text-overflow: ellipsis; white-space: nowrap; font-size: 9px; }
+      .footnote { margin: 15px 1px 0; color: #a0a9a4; font-size: 9px; line-height: 1.5; }
+      .toast { position: fixed; z-index: 5; left: 50%; bottom: 24px; max-width: min(520px, calc(100vw - 30px)); transform: translate(-50%, 20px); opacity: 0; pointer-events: none; padding: 11px 15px; border: 1px solid #dfe5df; border-radius: 9px; background: white; color: #45534c; box-shadow: 0 12px 30px #18231d20; font-size: 11px; transition: .2s ease; }
+      .toast.show { transform: translate(-50%, 0); opacity: 1; }
+      .toast.error { border-color: #f0d1cd; color: #9c473f; }
+      body[data-theme="dark"] { color-scheme: dark; --ink: #e4ece6; --muted: #9daaa2; --line: #354139; --paper: #1d2621; --canvas: #121814; --green: #65c594; --green-soft: #20382c; --amber: #deb06c; --red: #f18c80; }
+      body[data-theme="dark"] .topbar { border-color: #2a352e; background: rgba(25, 33, 28, .95); }
+      body[data-theme="dark"] .top-right { color: #a4b0a8; }
+      body[data-theme="dark"] .brand-mark, body[data-theme="dark"] .run-button { background: #287c55; }
+      body[data-theme="dark"] .run-button:hover:not(:disabled) { background: #328e62; }
+      body[data-theme="dark"] .theme-toggle { color: #d0dbd3; background: #222c26; border-color: #3a463e; }
+      body[data-theme="dark"] .theme-toggle:hover { background: #2a362e; border-color: #526057; }
+      body[data-theme="dark"] .local-tag, body[data-theme="dark"] .live-tag { color: #c3d0c8; background: #222c26; border-color: #3a463e; }
+      body[data-theme="dark"] .live-tag { color: #75d3a3; background: #1c3026; border-color: #2c4b39; }
+      body[data-theme="dark"] .db-chip { color: #c0ccc4; background: #1d2621; }
+      body[data-theme="dark"] .panel { border-color: #2c3730; box-shadow: 0 8px 26px #00000020; }
+      body[data-theme="dark"] .action { color: var(--ink); background: #202a24; }
+      body[data-theme="dark"] .action:hover:not(:disabled) { background: #26332b; border-color: #4a7d61; }
+      body[data-theme="dark"] .action.update .action-icon { color: #e2b86e; background: #3a3020; }
+      body[data-theme="dark"] .action.delete .action-icon { color: #f18e82; background: #3b2826; }
+      body[data-theme="dark"] .hint, body[data-theme="dark"] .keyboard-note { color: #93a097; }
+      body[data-theme="dark"] .batch-size { color: #b3c0b8; }
+      body[data-theme="dark"] kbd { color: #c1cdc5; background: #27322b; border-color: #3b473f; }
+      body[data-theme="dark"] .output-header { color: #a4b0a8; }
+      body[data-theme="dark"] .output-content { color: #c4d0c8; }
+      body[data-theme="dark"] .meta-cell { background: #252f29; }
+      body[data-theme="dark"] .meta-label, body[data-theme="dark"] .metric-detail { color: #98a59c; }
+      body[data-theme="dark"] .meta-value { color: #d5dfd8; }
+      body[data-theme="dark"] .cpu-model { color: #aebbb2; }
+      body[data-theme="dark"] .metric-name, body[data-theme="dark"] .chart-title, body[data-theme="dark"] .disk-title { color: #b3c0b8; }
+      body[data-theme="dark"] .metric-name svg { color: #99a79e; }
+      body[data-theme="dark"] .bar { background: #303b34; }
+      body[data-theme="dark"] .chart-block, body[data-theme="dark"] .disk-summary { border-color: #303b34; }
+      body[data-theme="dark"] .chart-title span:last-child, body[data-theme="dark"] .legend, body[data-theme="dark"] .disk-label { color: #94a198; }
+      body[data-theme="dark"] .disk-title strong { color: #d4ded7; }
+      body[data-theme="dark"] .footnote { color: #849188; }
+      body[data-theme="dark"] .toast { color: #d7e1da; background: #26312a; border-color: #3c493f; box-shadow: 0 12px 30px #00000050; }
+      body[data-theme="dark"] .toast.error { color: #ffaaa0; border-color: #70413b; }
+      @media (max-width: 940px) { .layout { grid-template-columns: minmax(0, 1fr) 310px; gap: 14px; } .topbar { padding: 0 4vw; } main { width: 92vw; } }
+      @media (max-width: 760px) { .topbar { height: 58px; } .top-right > span:first-child { display: none; } main { margin-top: 29px; } .intro { align-items: flex-start; flex-direction: column; margin-bottom: 21px; } .db-chip { margin-top: -5px; } .layout { grid-template-columns: 1fr; } .right-column { position: static; } .telemetry { display: grid; grid-template-columns: 1fr 1fr; column-gap: 18px; } .telemetry-heading, .system-meta, .cpu-model, .chart-block, .disk-summary, .footnote { grid-column: 1 / -1; } .telemetry-heading { margin-bottom: 0; } .system-meta { margin: 15px 0 9px; } .cpu-model { padding-bottom: 12px; } .metric { margin-bottom: 12px; } .chart-block { margin-top: 8px; } .top-actions { gap: 7px; } }
+      @media (max-width: 520px) { .topbar { padding: 0 4vw; } .top-right { gap: 8px; } .top-actions { gap: 6px; } .local-tag { padding: 6px 8px; font-size: 9px; } .theme-toggle { padding: 6px 8px; font-size: 9px; } main { width: 92vw; } .workload { padding: 17px 15px; } .action-grid { grid-template-columns: 1fr; gap: 7px; margin-top: 14px; } .action { min-height: 57px; padding: 10px; } .action-icon { width: 31px; height: 31px; } .panel-heading { align-items: center; } .batch-size { flex-wrap: wrap; margin-top: 14px; } .batch-size small { flex-basis: 100%; margin-left: 0; } .sql-head { padding: 15px; } .sql-editor { min-height: 145px; padding: 14px 15px; } .sql-foot { padding: 9px 15px; } .keyboard-note { font-size: 9px; } .keyboard-note .hide-mobile { display: none; } .output-header, .output-content { padding-left: 15px; padding-right: 15px; } .telemetry { display: block; } .system-meta { margin: 15px 0; } .cpu-model { padding-bottom: 13px; } }
+      @media (max-width: 360px) { .theme-toggle { width: 30px; height: 30px; justify-content: center; padding: 0; } .theme-toggle span, .local-tag { display: none; } }
+    </style>
+  </head>
+  <body data-theme="light">
+    <header class="topbar">
+      <div class="brand"><span class="brand-mark" aria-hidden="true"><svg width="18" height="18" viewBox="0 0 24 24" fill="none"><path d="M7 16.5c0-1.7 1.2-2.9 3-2.9h4c1.8 0 3 1.2 3 2.9 0 1.4-1.2 2.5-3 2.5h-4c-1.8 0-3-1.1-3-2.5Z" stroke="currentColor" stroke-width="1.8"/><path d="M12 13.4V5m0 0L8.7 8.3M12 5l3.3 3.3" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg></span>pebble <span style="color:#98a29c;font-weight:500">/ studio</span></div>
+      <div class="top-right"><span>Native database workbench</span><div class="top-actions"><button class="theme-toggle" id="theme-toggle" type="button" aria-pressed="false"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M20.5 15.1A8.5 8.5 0 0 1 8.9 3.5 8.6 8.6 0 1 0 20.5 15.1Z" stroke="currentColor" stroke-width="1.7" stroke-linejoin="round"/></svg><span>Dark mode</span></button><span class="local-tag"><i class="dot"></i> Running locally</span></div></div>
+    </header>
+    <main>
+      <section class="intro">
+        <div><div class="eyebrow">Pebble DBMS · Presenter mode</div><h1>Make your database move.</h1><p>Run SQL, choose a batch size, and watch your machine respond in real time.</p></div>
+        <div class="db-chip"><svg width="14" height="14" viewBox="0 0 24 24" fill="none"><ellipse cx="12" cy="5" rx="8" ry="3" stroke="currentColor" stroke-width="1.7"/><path d="M4 5v7c0 1.7 3.6 3 8 3s8-1.3 8-3V5M4 12v7c0 1.7 3.6 3 8 3s8-1.3 8-3v-7" stroke="currentColor" stroke-width="1.7"/></svg><span id="db-path">Connecting to database…</span></div>
+      </section>
+      <div class="layout">
+        <div class="main-column">
+          <section class="panel workload">
+            <div class="panel-heading"><div><h2 class="section-title">Workload controls</h2><p class="section-sub">Add rows repeatedly, then update or clear the demo table.</p></div><div class="row-count"><strong id="row-count">—</strong><span>rows in demo table</span></div></div>
+            <div class="batch-size"><label for="rows-to-add">Rows to add</label><input id="rows-to-add" type="number" min="1" max="100000" step="1" value="10000" aria-label="Number of rows to add"><small>1–100,000 per run</small></div>
+            <div class="action-grid">
+              <button class="action add" data-action="add"><span class="action-icon"><svg width="17" height="17" viewBox="0 0 24 24" fill="none"><path d="M12 5v14M5 12h14" stroke="currentColor" stroke-width="1.9" stroke-linecap="round"/></svg></span><span><strong id="add-label">Add 10,000</strong><small>Append these rows</small></span></button>
+              <button class="action update" data-action="update"><span class="action-icon"><svg width="17" height="17" viewBox="0 0 24 24" fill="none"><path d="M20 7v5h-5M4.9 9a7.5 7.5 0 0 1 12.8-2L20 9m-16 8v-5h5m10.1 3a7.5 7.5 0 0 1-12.8 2L4 15" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg></span><span><strong>Update all rows</strong><small>Change every score to 9001</small></span></button>
+              <button class="action delete" data-action="delete"><span class="action-icon"><svg width="16" height="16" viewBox="0 0 24 24" fill="none"><path d="M4.5 7h15M9 7V4.5h6V7m3.5 0-.8 12H6.3l-.8-12M10 10v6m4-6v6" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/></svg></span><span><strong>Delete all rows</strong><small>Clear the demo data</small></span></button>
+            </div>
+            <p class="hint"><svg width="13" height="13" viewBox="0 0 24 24" fill="none"><circle cx="12" cy="12" r="9" stroke="currentColor" stroke-width="1.7"/><path d="M12 11v5m0-8h.01" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"/></svg>Each add appends fresh IDs, so you can run it again without deleting existing rows.</p>
+          </section>
+
+          <section class="panel sql-panel">
+            <div class="sql-head"><div><div class="sql-label"><svg width="15" height="15" viewBox="0 0 24 24" fill="none"><path d="m8 5-7 7 7 7M16 5l7 7-7 7m-3-16-2 18" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/></svg><h2 class="section-title">SQL console</h2></div><p class="section-sub">Send commands to the native Pebble engine.</p></div><span class="local-tag">SQL</span></div>
+            <textarea class="sql-editor" id="sql" spellcheck="false" aria-label="SQL command" placeholder="SELECT COUNT(*) FROM demo_entries;\n\nTry any supported Pebble SQL statement…">SELECT id, label, score FROM demo_entries ORDER BY id LIMIT 10;</textarea>
+            <div class="sql-foot"><span class="keyboard-note"><kbd>⌘</kbd><kbd>↵</kbd><span class="hide-mobile"> &nbsp;to run</span></span><button class="run-button" id="run-sql"><svg width="13" height="13" viewBox="0 0 24 24" fill="none"><path d="m8 5 11 7-11 7V5Z" fill="currentColor"/></svg>Run SQL</button></div>
+            <div class="output-wrap" id="output-wrap"><div class="output-header"><span>RESULT</span><span class="output-status success" id="output-status"><i class="dot"></i> Ready</span></div><pre class="output-content" id="output"></pre></div>
+          </section>
+        </div>
+
+        <aside class="right-column">
+          <section class="panel telemetry">
+            <div class="telemetry-heading"><h2 class="section-title"><svg width="16" height="16" viewBox="0 0 24 24" fill="none"><path d="M3 12h3l2.2-7 4.1 14 2.3-7H21" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>Machine telemetry</h2><span class="live-tag"><i class="dot"></i> LIVE</span></div>
+            <div class="system-meta"><div class="meta-cell"><span class="meta-label">Operating system</span><span class="meta-value" id="platform">Detecting…</span></div><div class="meta-cell"><span class="meta-label">Architecture</span><span class="meta-value" id="architecture">—</span></div><div class="meta-cell"><span class="meta-label">CPU cores</span><span class="meta-value" id="cpu-count">—</span></div><div class="meta-cell"><span class="meta-label">Memory installed</span><span class="meta-value" id="memory-total">—</span></div></div>
+            <div class="cpu-model" id="cpu-model">Reading processor information…</div>
+            <div class="metric"><div class="metric-top"><span class="metric-name"><svg width="13" height="13" viewBox="0 0 24 24" fill="none"><rect x="5" y="5" width="14" height="14" rx="2" stroke="currentColor" stroke-width="1.7"/><path d="M9 2v3m6-3v3m-6 14v3m6-3v3M2 9h3m-3 6h3m14-6h3m-3 6h3" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"/></svg>Processor load</span><span class="metric-value" id="cpu-value">—%</span></div><div class="bar"><span id="cpu-bar"></span></div><div class="metric-detail" id="cpu-detail">System-wide utilization</div></div>
+            <div class="metric"><div class="metric-top"><span class="metric-name"><svg width="13" height="13" viewBox="0 0 24 24" fill="none"><rect x="3" y="5" width="18" height="14" rx="2" stroke="currentColor" stroke-width="1.7"/><path d="M7 9h10M7 13h5m-5 3h3" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"/></svg>Whole-machine RAM</span><span class="metric-value" id="memory-value">—%</span></div><div class="bar memory"><span id="memory-bar"></span></div><div class="metric-detail" id="memory-detail">— used</div></div>
+            <div class="chart-block"><div class="chart-title"><span>Resource activity</span><span>last 90 seconds</span></div><canvas id="chart" aria-label="Live CPU and whole-machine RAM chart"></canvas><div class="legend"><span><i></i>CPU</span><span><i class="ram-dot"></i>Machine RAM</span></div></div>
+            <div class="disk-summary"><div class="disk-title"><strong>Storage volume</strong><span id="disk-value">— used</span></div><div class="disk-label" id="disk-label">Reading disk information…</div><div class="bar disk"><span id="disk-bar"></span></div><div class="metric-detail" id="disk-detail">— capacity</div></div>
+            <p class="footnote">Metrics are read from the host OS. CPU and memory refresh every 1.5 seconds.</p>
+          </section>
+        </aside>
+      </div>
+    </main>
+    <div class="toast" id="toast" role="status"></div>
+    <script>
+      const $ = (selector) => document.querySelector(selector);
+      const histories = { cpu: [], memory: [] };
+      const historyLength = 60;
+      let busy = false;
+      let toastTimer;
+
+      function formatBytes(value) {
+        if (value == null || Number.isNaN(Number(value))) return '—';
+        const units = ['B', 'KB', 'MB', 'GB', 'TB', 'PB'];
+        let amount = Number(value), unit = 0;
+        while (amount >= 1024 && unit < units.length - 1) { amount /= 1024; unit++; }
+        return `${amount.toFixed(unit === 0 ? 0 : 1)} ${units[unit]}`;
+      }
+
+      function setToast(message, isError = false) {
+        const toast = $('#toast');
+        toast.textContent = message;
+        toast.classList.toggle('error', isError);
+        toast.classList.add('show');
+        clearTimeout(toastTimer);
+        toastTimer = setTimeout(() => toast.classList.remove('show'), 3300);
+      }
+
+      function drawChart() {
+        const canvas = $('#chart');
+        const rect = canvas.getBoundingClientRect();
+        if (!rect.width || !rect.height) return;
+        const ratio = window.devicePixelRatio || 1;
+        canvas.width = Math.round(rect.width * ratio);
+        canvas.height = Math.round(rect.height * ratio);
+        const ctx = canvas.getContext('2d');
+        ctx.scale(ratio, ratio);
+        const width = rect.width, height = rect.height;
+        const dark = document.body.dataset.theme === 'dark';
+        const pad = { left: 27, right: 5, top: 6, bottom: 14 };
+        const plotW = width - pad.left - pad.right, plotH = height - pad.top - pad.bottom;
+        ctx.font = '8px Inter, sans-serif';
+        ctx.textAlign = 'right';
+        for (let tick = 0; tick <= 100; tick += 25) {
+          const y = pad.top + plotH * (1 - tick / 100);
+          ctx.beginPath(); ctx.moveTo(pad.left, y); ctx.lineTo(width - pad.right, y);
+          ctx.strokeStyle = dark ? '#303b34' : '#edf0ed'; ctx.lineWidth = 1; ctx.stroke();
+          ctx.fillStyle = dark ? '#94a198' : '#a1aaa5'; ctx.fillText(String(tick), pad.left - 7, y + 3);
+        }
+        const series = [
+          { data: histories.cpu, color: '#39a778' },
+          { data: histories.memory, color: '#718fc5' },
+        ];
+        series.forEach(({ data, color }) => {
+          if (!data.length) return;
+          ctx.beginPath();
+          data.forEach((value, index) => {
+            const x = pad.left + index * plotW / (historyLength - 1);
+            const y = pad.top + plotH * (1 - Math.max(0, Math.min(100, value)) / 100);
+            if (index === 0) ctx.moveTo(x, y); else ctx.lineTo(x, y);
+          });
+          ctx.strokeStyle = color; ctx.lineWidth = 1.9; ctx.lineJoin = 'round'; ctx.lineCap = 'round'; ctx.stroke();
+          const last = data[data.length - 1];
+          const x = pad.left + (data.length - 1) * plotW / (historyLength - 1);
+          const y = pad.top + plotH * (1 - Math.max(0, Math.min(100, last)) / 100);
+          ctx.beginPath(); ctx.arc(x, y, 2.5, 0, Math.PI * 2); ctx.fillStyle = color; ctx.fill();
+        });
+      }
+
+      function updateMetrics(data) {
+        $('#platform').textContent = data.platform || 'Unknown';
+        $('#architecture').textContent = data.architecture || '—';
+        $('#cpu-count').textContent = `${data.logical_cpus || '—'} logical`;
+        $('#memory-total').textContent = formatBytes(data.memory_total);
+        $('#cpu-model').textContent = data.cpu_model || 'CPU model unavailable';
+        $('#cpu-value').textContent = `${Number(data.cpu_percent || 0).toFixed(1)}%`;
+        $('#cpu-bar').style.width = `${Math.max(0, Math.min(100, data.cpu_percent || 0))}%`;
+        $('#cpu-detail').textContent = `${Number(data.cpu_percent || 0).toFixed(1)}% across ${data.logical_cpus || 1} logical cores`;
+        $('#memory-value').textContent = `${Number(data.memory_percent || 0).toFixed(1)}%`;
+        $('#memory-bar').style.width = `${Math.max(0, Math.min(100, data.memory_percent || 0))}%`;
+        $('#memory-detail').textContent = `${formatBytes(data.memory_used)} used of ${formatBytes(data.memory_total)}`;
+        $('#disk-value').textContent = `${formatBytes(data.disk_used)} used`;
+        $('#disk-label').textContent = `${data.disk_kind || 'Storage'} · ${data.disk_device || 'system volume'}`;
+        $('#disk-bar').style.width = `${Math.max(0, Math.min(100, data.disk_percent || 0))}%`;
+        $('#disk-detail').textContent = `${formatBytes(data.disk_free)} free of ${formatBytes(data.disk_total)} · ${data.disk_path || ''}`;
+        histories.cpu.push(Number(data.cpu_percent || 0));
+        histories.memory.push(Number(data.memory_percent || 0));
+        histories.cpu.splice(0, Math.max(0, histories.cpu.length - historyLength));
+        histories.memory.splice(0, Math.max(0, histories.memory.length - historyLength));
+        drawChart();
+      }
+
+      async function refreshMetrics() {
+        try {
+          const response = await fetch('/api/metrics', { cache: 'no-store' });
+          if (response.ok) updateMetrics(await response.json());
+        } catch (_) { /* Keep the last sample if the local server is briefly busy. */ }
+      }
+
+      async function refreshStatus() {
+        try {
+          const response = await fetch('/api/status', { cache: 'no-store' });
+          const status = await response.json();
+          if (!response.ok) throw new Error(status.error || 'Could not connect to Pebble');
+          $('#db-path').textContent = status.database.split('/').slice(-2).join('/');
+          $('#db-path').title = status.database;
+          $('#row-count').textContent = Number(status.rows).toLocaleString();
+          $('.action.add').disabled = busy;
+          $('.action.update').disabled = Number(status.rows) === 0 || busy;
+          $('.action.delete').disabled = Number(status.rows) === 0 || busy;
+        } catch (error) {
+          $('#db-path').textContent = 'Database unavailable';
+          setToast(error.message, true);
+        }
+      }
+
+      function setBusy(value) {
+        busy = value;
+        $('#run-sql').disabled = value;
+        $('#sql').disabled = value;
+        $('#rows-to-add').disabled = value;
+        document.querySelectorAll('.action').forEach((button) => button.disabled = value);
+      }
+
+      function updateAddLabel() {
+        const rows = Number($('#rows-to-add').value);
+        $('#add-label').textContent = Number.isInteger(rows) && rows > 0 ? `Add ${rows.toLocaleString()}` : 'Add rows';
+      }
+
+      function showOutput({ ok, output, error, message }) {
+        $('#output-wrap').classList.add('visible');
+        const status = $('#output-status');
+        status.className = `output-status ${ok ? 'success' : 'error'}`;
+        status.innerHTML = `<i class="dot" style="${ok ? '' : 'background:#bd5b50;box-shadow:0 0 0 3px #bd5b5020'}"></i>${ok ? 'Success' : 'Error'}`;
+        $('#output').textContent = [message, output, error].filter(Boolean).join('\n');
+      }
+
+      async function runSQL() {
+        const sql = $('#sql').value.trim();
+        if (!sql || busy) return;
+        setBusy(true);
+        $('#output-wrap').classList.add('visible');
+        $('#output-status').textContent = 'Running…';
+        $('#output').textContent = 'Sending statement to Pebble…';
+        try {
+          const response = await fetch('/api/sql', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ sql }) });
+          const result = await response.json();
+          showOutput(result);
+          if (!response.ok) setToast(result.error || 'SQL command failed', true);
+          else { if (result.rows != null) $('#row-count').textContent = Number(result.rows).toLocaleString(); setToast('SQL command completed'); }
+        } catch (error) { showOutput({ ok: false, error: error.message }); setToast(error.message, true); }
+        finally { setBusy(false); await refreshStatus(); }
+      }
+
+      async function runWorkload(action) {
+        if (busy) return;
+        let rows = null;
+        if (action === 'add') {
+          rows = Number($('#rows-to-add').value);
+          if (!Number.isInteger(rows) || rows < 1 || rows > 100000) {
+            setToast('Choose a whole number from 1 to 100,000 rows.', true);
+            return;
+          }
+        }
+        const button = document.querySelector(`[data-action="${action}"]`);
+        const previous = button.innerHTML;
+        button.innerHTML = '<span class="action-icon"><span class="spinner"></span></span><span><strong>Working…</strong><small>Database operation in progress</small></span>';
+        setBusy(true);
+        $('#output-wrap').classList.add('visible');
+        $('#output-status').textContent = 'Running workload…';
+        $('#output').textContent = action === 'add' ? `Appending ${rows.toLocaleString()} entries. Live metrics continue updating while Pebble writes the pages…` : 'Executing against the demo table…';
+        try {
+          const request = action === 'add' ? { action, rows } : { action };
+          const response = await fetch('/api/workload', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(request) });
+          const result = await response.json();
+          showOutput(result);
+          if (!response.ok) setToast(result.error || 'Workload failed', true);
+          else setToast(result.message || 'Workload completed');
+        } catch (error) { showOutput({ ok: false, error: error.message }); setToast(error.message, true); }
+        finally { button.innerHTML = previous; setBusy(false); await refreshStatus(); }
+      }
+
+      function applyTheme(theme) {
+        const dark = theme === 'dark';
+        document.body.dataset.theme = dark ? 'dark' : 'light';
+        const button = $('#theme-toggle');
+        button.setAttribute('aria-pressed', String(dark));
+        button.setAttribute('aria-label', dark ? 'Switch to light mode' : 'Switch to dark mode');
+        button.title = dark ? 'Switch to light mode' : 'Switch to dark mode';
+        button.innerHTML = dark
+          ? '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" aria-hidden="true"><circle cx="12" cy="12" r="4" stroke="currentColor" stroke-width="1.7"/><path d="M12 2v2m0 16v2M4.93 4.93l1.42 1.42m11.3 11.3 1.42 1.42M2 12h2m16 0h2M4.93 19.07l1.42-1.42m11.3-11.3 1.42-1.42" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"/></svg><span>Light mode</span>'
+          : '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M20.5 15.1A8.5 8.5 0 0 1 8.9 3.5 8.6 8.6 0 1 0 20.5 15.1Z" stroke="currentColor" stroke-width="1.7" stroke-linejoin="round"/></svg><span>Dark mode</span>';
+        document.querySelector('meta[name="theme-color"]').content = dark ? '#121814' : '#f4f5f2';
+        drawChart();
+      }
+
+      $('#run-sql').addEventListener('click', runSQL);
+      $('#theme-toggle').addEventListener('click', () => {
+        const next = document.body.dataset.theme === 'dark' ? 'light' : 'dark';
+        applyTheme(next);
+        try { localStorage.setItem('pebble-studio-theme', next); } catch (_) { /* Keep the current choice for this page. */ }
+      });
+      $('#rows-to-add').addEventListener('input', updateAddLabel);
+      $('#sql').addEventListener('keydown', (event) => {
+        if ((event.metaKey || event.ctrlKey) && event.key === 'Enter') { event.preventDefault(); runSQL(); }
+        if (event.key === 'Tab') { event.preventDefault(); const start = event.target.selectionStart, end = event.target.selectionEnd; event.target.setRangeText('  ', start, end, 'end'); }
+      });
+      document.querySelectorAll('.action').forEach((button) => button.addEventListener('click', () => runWorkload(button.dataset.action)));
+      window.addEventListener('resize', drawChart);
+      try { applyTheme(localStorage.getItem('pebble-studio-theme') || 'light'); } catch (_) { applyTheme('light'); }
+      updateAddLabel();
+      refreshMetrics(); refreshStatus();
+      setInterval(refreshMetrics, 1500);
+      setInterval(() => { if (!busy) refreshStatus(); }, 15000);
+    </script>
+    <style>
+      .spinner { display: block; height: 14px; width: 14px; border: 2px solid #83bea1; border-top-color: transparent; border-radius: 50%; animation: spin .7s linear infinite; }
+      @keyframes spin { to { transform: rotate(360deg); } }
+    </style>
+  </body>
+</html>

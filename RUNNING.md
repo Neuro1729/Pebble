@@ -107,6 +107,30 @@ cat ./setup.sql | ./scripts/dbms ./people.db
 make run DB_PATH=./people.db
 ```
 
+## E. Browser studio
+
+Build the native client and launch the local presenter UI:
+
+```
+make debug
+./scripts/studio
+```
+
+Open the `http://127.0.0.1:8765` URL printed by the server. The SQL console
+sends commands to the same native client and accepts the SQL supported by
+Pebble. The workload controls use a dedicated `demo_entries` table. Choose
+between 1 and 100,000 rows to append per run; repeated adds use new IDs. Update
+changes every score, and delete clears the table. The right panel reports CPU,
+whole-machine memory, and system-volume capacity and plots CPU and memory use
+over time. Use the header toggle to switch between light and dark themes; the
+choice is saved in the browser. Telemetry is read from macOS or Linux host
+interfaces; storage model and SSD type are shown when the operating system
+exposes them.
+
+The studio binds to localhost. Choose another database file with
+`PEBBLE_STUDIO_DB=/path/to/demo.db ./scripts/studio`. The default database is
+`data/presenter.db`.
+
 `--database FILE` selects a database file, and the legacy positional file
 argument remains supported. `--execute` and `--file` accept multiple
 semicolon-terminated statements. `--table` enables aligned result tables in
@@ -133,7 +157,7 @@ The current engine materializes each query result before formatting it. The
 table formatter sizes columns from all returned rows, so large results can use
 substantial memory; it does not silently truncate values.
 
-## E. Example workflow
+## F. Example workflow
 
 ```
 make -j
@@ -157,7 +181,7 @@ The next process reopens the same rows and catalog. Keep the `.catalog` sidecar
 beside the page file. To choose a named database directory, use
 `./scripts/dbms --database-dir ./data` and issue `CREATE DATABASE`/`USE`.
 
-## F. Testing and troubleshooting
+## G. Testing and troubleshooting
 
 make test exercises C page-file allocation/read/write/reopen, ARC replacement,
 buffer-pool pinning/eviction/dirty flushing, B+Tree leaf and internal splits,
@@ -174,14 +198,14 @@ test functions with temporary-path and raises shims: 76 passed and 7 tests
 remained skipped by their existing module-level markers. This is useful
 coverage, but it does not replace a run under pytest itself.
 
-## G. Platform-specific notes
+## H. Platform-specific notes
 
 The Makefile uses portable C17/C++20 flags and no CPU-specific options. The
 native build and tests ran on macOS with Apple Clang 21 and GNU Make 3.81.
 Linux support is configured in CI but was not run locally. Cross-compilation
 also remains unverified; run target binaries on their target OS.
 
-## H. Current limitations
+## I. Current limitations
 
 The native disk scheduler serializes page reads and writes through a worker,
 while each cache operation waits for its request to finish. Disk-backed sort

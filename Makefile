@@ -37,7 +37,7 @@ DBMS = $(BUILD_DIR)/bin/dbms
 DEPS = $(C_OBJECTS:.o=.d) $(CXX_OBJECTS:.o=.d)
 TEST_OBJECTS = $(filter-out $(BUILD_DIR)/obj/cpp/main.o,$(CXX_OBJECTS))
 
-.PHONY: all lib test check bench clean run debug release help install
+.PHONY: all lib test check bench clean run debug release help install studio
 
 all: $(DBMS)
 
@@ -72,6 +72,9 @@ bench:
 run: $(DBMS)
 	$(DBMS) $(RUN_ARGS)
 
+studio: $(DBMS)
+	python3 scripts/studio.py
+
 debug:
 	$(MAKE) CONFIG=debug all
 
@@ -87,7 +90,7 @@ clean:
 	@if test "$(BUILD_DIR)" != "build"; then rm -rf "$(BUILD_DIR)"; fi
 
 help:
-	@echo "Targets: all lib test check bench run debug release clean install help"
+	@echo "Targets: all lib test check bench run studio debug release clean install help"
 	@echo "Settings: CONFIG=debug|release BUILD_DIR=... PREFIX=... CC=... CXX=..."
 	@echo "          DB_PATH=... RUN_ARGS='--database-dir ./data'"
 	@echo "          CFLAGS=... CXXFLAGS=... CPPFLAGS=... LDFLAGS=... LDLIBS=..."
