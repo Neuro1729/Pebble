@@ -1,3 +1,6 @@
+// Implements the B+ tree index used to find records by integer key. It
+// handles index pages, key updates, page splits, and range scans.
+
 #include "pebble/index.hpp"
 
 #include <algorithm>
@@ -17,6 +20,7 @@ constexpr std::size_t kInternalSlotSize = 8;
 constexpr std::uint16_t kLeafMax = (PB_PAGE_SIZE - kLeafHeaderSize) / (kKeySize + kRidSize);
 constexpr std::uint16_t kInternalMax = (PB_PAGE_SIZE - kInternalHeaderSize) / kInternalSlotSize;
 
+// Reads and writes the numeric fields stored in index pages.
 void put_u16(std::uint8_t *out, std::uint16_t value) {
   out[0] = static_cast<std::uint8_t>(value);
   out[1] = static_cast<std::uint8_t>(value >> 8);
@@ -43,10 +47,12 @@ void put_i32(std::uint8_t *out, std::int32_t value) {
   put_u32(out, static_cast<std::uint32_t>(value));
 }
 
+// Converts storage errors into exceptions for the index operations.
 void check_status(pb_status status, const char *error) {
   if (status != PB_STATUS_OK)
     throw std::runtime_error(std::string(pb_status_name(status)) + ": " + error);
 }
+// Reads an index page through the buffer pool or directly from disk.
 pb_page read_page(pb_disk_manager *disk, std::int32_t id,
                   BufferPoolManager *buffer_pool) {
   if (buffer_pool != nullptr) return buffer_pool->read_page(id);
@@ -55,6 +61,7 @@ pb_page read_page(pb_disk_manager *disk, std::int32_t id,
   check_status(pb_disk_read_page(disk, id, &page, error, sizeof(error)), error);
   return page;
 }
+// Writes an index page through the buffer pool or directly to disk.
 void write_page(pb_disk_manager *disk, const pb_page &page,
                 BufferPoolManager *buffer_pool) {
   if (buffer_pool != nullptr) {
@@ -71,6 +78,7 @@ std::int32_t leaf_next(const pb_page &page) { return signed_i32(page.data + 5); 
 std::uint16_t internal_size(const pb_page &page) { return get_u16(page.data + 1); }
 std::uint16_t internal_max(const pb_page &page) { return get_u16(page.data + 3); }
 
+// Sets up an empty leaf page for index keys and record locations.
 void initialize_leaf(pb_page &page, std::uint16_t max_size = kLeafMax,
                      std::int32_t next_id = PB_INVALID_PAGE_ID) {
   if (max_size == 0 || max_size > kLeafMax) throw std::runtime_error("invalid leaf max size");
@@ -80,6 +88,7 @@ void initialize_leaf(pb_page &page, std::uint16_t max_size = kLeafMax,
   put_u16(page.data + 3, max_size);
   put_i32(page.data + 5, next_id);
 }
+// Sets up an empty internal page for tree separators and child pages.
 void initialize_internal(pb_page &page, std::uint16_t max_size = kInternalMax) {
   if (max_size < 2 || max_size > kInternalMax) throw std::runtime_error("invalid internal max size");
   pb_page_init(&page, page.page_id);
@@ -95,6 +104,7 @@ void set_internal_size(pb_page &page, std::uint16_t size) {
   if (size > internal_max(page)) throw std::runtime_error("internal size exceeds capacity");
   put_u16(page.data + 1, size);
 }
+// Reads a key or record location from a leaf page.
 std::int32_t leaf_key(const pb_page &page, std::uint16_t index) {
   if (page_type(page) != kLeaf || index >= leaf_size(page)) throw std::runtime_error("invalid leaf key index");
   return signed_i32(page.data + kLeafHeaderSize + static_cast<std::size_t>(index) * kKeySize);
@@ -115,6 +125,7 @@ void set_leaf_entry(pb_page &page, std::uint16_t index, std::int32_t key, Record
   put_u16(page.data + rid_offset + 4, rid.slot_num);
   page.data[rid_offset + 6] = page.data[rid_offset + 7] = 0;
 }
+// Reads a separator key or child page from an internal page.
 std::int32_t internal_key(const pb_page &page, std::uint16_t index) {
   if (page_type(page) != kInternal || index >= internal_size(page)) throw std::runtime_error("invalid internal key index");
   return signed_i32(page.data + kInternalHeaderSize + static_cast<std::size_t>(index) * kInternalSlotSize);
@@ -129,6 +140,7 @@ void set_internal_entry(pb_page &page, std::uint16_t index, std::int32_t key, st
   put_i32(page.data + offset, key);
   put_i32(page.data + offset + 4, child);
 }
+// Finds where a key belongs in a sorted leaf page.
 std::uint16_t leaf_lower_bound(const pb_page &page, std::int32_t key) {
   std::uint16_t lo = 0, hi = leaf_size(page);
   while (lo < hi) {
@@ -138,6 +150,7 @@ std::uint16_t leaf_lower_bound(const pb_page &page, std::int32_t key) {
   }
   return lo;
 }
+// Chooses the child page that may contain the requested key.
 std::uint16_t child_index(const pb_page &page, std::int32_t key) {
   const auto size = internal_size(page);
   if (size == 0) throw std::runtime_error("empty internal page");
@@ -152,6 +165,7 @@ std::uint16_t child_index(const pb_page &page, std::int32_t key) {
 
 }  // namespace
 
+// Opens an existing tree using its root page and page capacity.
 BPlusTree::BPlusTree(pb_disk_manager *disk, std::int32_t root_page_id,
                      std::uint16_t internal_max_size,
                      BufferPoolManager *buffer_pool)
@@ -166,6 +180,7 @@ BPlusTree::BPlusTree(pb_disk_manager *disk, std::int32_t root_page_id,
                      BufferPoolManager *buffer_pool)
     : BPlusTree(disk, root_page_id, kInternalMax, buffer_pool) {}
 
+// Creates a new tree with an empty root leaf page.
 BPlusTree BPlusTree::create(pb_disk_manager *disk, std::uint16_t leaf_max_size,
                             std::uint16_t internal_max_size,
                             BufferPoolManager *buffer_pool) {
@@ -187,6 +202,7 @@ BPlusTree BPlusTree::create(pb_disk_manager *disk,
   return create(disk, leaf_max_size, internal_max_size, buffer_pool);
 }
 
+// Allocates a page for a new tree node.
 std::int32_t BPlusTree::allocate_page() {
   char error[256]{};
   std::int32_t id{};
@@ -194,6 +210,7 @@ std::int32_t BPlusTree::allocate_page() {
   return id;
 }
 
+// Follows the tree from its root to the leaf for a key.
 std::int32_t BPlusTree::find_leaf(std::int32_t key) const {
   auto page_id = root_page_id_;
   std::uint64_t depth = 0;
@@ -210,6 +227,7 @@ std::int32_t BPlusTree::find_leaf(std::int32_t key) const {
   }
 }
 
+// Looks up a key and returns its record location when present.
 std::optional<RecordId> BPlusTree::search(std::int32_t key) const {
   const auto page_id = find_leaf(key);
   const auto page = read_page(disk_, page_id, buffer_pool_);
@@ -218,6 +236,7 @@ std::optional<RecordId> BPlusTree::search(std::int32_t key) const {
   return leaf_rid(page, index);
 }
 
+// Adds a key and record location, splitting full pages when needed.
 void BPlusTree::insert(std::int32_t key, RecordId value) {
   if (value.page_id < 0) throw std::runtime_error("invalid RID page id");
   if (search(key).has_value()) throw std::runtime_error("duplicate index key: " + std::to_string(key));
@@ -236,6 +255,7 @@ void BPlusTree::insert(std::int32_t key, RecordId value) {
   insert_parent(leaf_id, separator, right_id);
 }
 
+// Splits a full leaf and returns the separator key and new page.
 std::pair<std::int32_t, std::int32_t> BPlusTree::split_leaf_and_insert(
     std::int32_t leaf_id, std::int32_t key, RecordId value) {
   auto leaf = read_page(disk_, leaf_id, buffer_pool_);
@@ -262,6 +282,7 @@ std::pair<std::int32_t, std::int32_t> BPlusTree::split_leaf_and_insert(
   return {entries[mid].first, right_id};
 }
 
+// Adds a split's separator to its parent, splitting that page if needed.
 void BPlusTree::insert_parent(std::int32_t left_id, std::int32_t key,
                               std::int32_t right_id) {
   if (left_id == root_page_id_) {
@@ -287,6 +308,7 @@ void BPlusTree::insert_parent(std::int32_t left_id, std::int32_t key,
   insert_parent(parent_id, middle_key, new_right_id);
 }
 
+// Creates a new root when the current root splits.
 void BPlusTree::grow_root(std::int32_t left_id, std::int32_t key,
                           std::int32_t right_id) {
   const auto new_root_id = allocate_page();
@@ -300,6 +322,7 @@ void BPlusTree::grow_root(std::int32_t left_id, std::int32_t key,
   root_page_id_ = new_root_id;
 }
 
+// Finds the internal page that points to a given child page.
 std::int32_t BPlusTree::find_parent(std::int32_t page_id,
                                     std::int32_t child_id) const {
   const auto page = read_page(disk_, page_id, buffer_pool_);
@@ -319,6 +342,7 @@ std::int32_t BPlusTree::find_parent(std::int32_t page_id,
   return PB_INVALID_PAGE_ID;
 }
 
+// Splits a full internal page and returns its promoted separator.
 std::pair<std::int32_t, std::int32_t> BPlusTree::split_internal_and_insert(
     std::int32_t node_id, std::int32_t left_child_id, std::int32_t key,
     std::int32_t right_id) {
@@ -358,6 +382,7 @@ std::pair<std::int32_t, std::int32_t> BPlusTree::split_internal_and_insert(
   return {middle_key, new_right_id};
 }
 
+// Removes a key from its leaf and reports whether it was found.
 bool BPlusTree::erase(std::int32_t key) {
   const auto page_id = find_leaf(key);
   auto page = read_page(disk_, page_id, buffer_pool_);
@@ -371,6 +396,7 @@ bool BPlusTree::erase(std::int32_t key) {
   return true;
 }
 
+// Returns indexed records within the optional inclusive key bounds.
 std::vector<std::pair<std::int32_t, RecordId>> BPlusTree::scan(
     std::optional<std::int32_t> low, std::optional<std::int32_t> high) const {
   auto page_id = low.has_value() ? find_leaf(*low) : root_page_id_;

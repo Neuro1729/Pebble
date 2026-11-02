@@ -1,3 +1,6 @@
+// Provides the Pebble command-line client. It handles command-line options,
+// database selection, SQL input, and displaying query results.
+
 #include "pebble/engine.hpp"
 
 #include <algorithm>
@@ -28,8 +31,10 @@ namespace {
 
 volatile std::sig_atomic_t interrupted = 0;
 
+// Records a Ctrl-C signal so the input loop can handle it safely.
 void handle_sigint(int) { interrupted = 1; }
 
+// Removes whitespace around input text.
 std::string trim(std::string text) {
   const auto first = text.find_first_not_of(" \t\r\n");
   if (first == std::string::npos) return {};
@@ -37,6 +42,7 @@ std::string trim(std::string text) {
   return text.substr(first, last - first + 1);
 }
 
+// Replaces line breaks outside quoted text with spaces for SQL parsing.
 std::string normalize_statement_whitespace(const std::string &statement) {
   std::string normalized;
   normalized.reserve(statement.size());
@@ -66,6 +72,7 @@ std::string normalize_statement_whitespace(const std::string &statement) {
   return trim(std::move(normalized));
 }
 
+// Converts text to lowercase for command matching.
 std::string lower(std::string text) {
   std::transform(text.begin(), text.end(), text.begin(), [](unsigned char ch) {
     return static_cast<char>(std::tolower(ch));
@@ -73,6 +80,7 @@ std::string lower(std::string text) {
   return text;
 }
 
+// Checks whether input is connected to a terminal.
 bool stdin_is_terminal() {
 #if defined(__APPLE__) || defined(__linux__) || defined(__unix__)
   return ::isatty(STDIN_FILENO) != 0;
@@ -81,6 +89,7 @@ bool stdin_is_terminal() {
 #endif
 }
 
+// Checks whether output is connected to a terminal.
 bool stdout_is_terminal() {
 #if defined(__APPLE__) || defined(__linux__) || defined(__unix__)
   return ::isatty(STDOUT_FILENO) != 0;
@@ -89,6 +98,7 @@ bool stdout_is_terminal() {
 #endif
 }
 
+// Chooses the data folder from the environment or the current directory.
 std::filesystem::path default_data_directory() {
   if (const auto *configured = std::getenv("PEBBLE_DATA_DIR");
       configured != nullptr && configured[0] != '\0')
@@ -96,11 +106,13 @@ std::filesystem::path default_data_directory() {
   return std::filesystem::current_path() / "data";
 }
 
+// Checks that a database name uses the supported identifier format.
 bool valid_database_name(const std::string &name) {
   static const std::regex identifier(R"(^[A-Za-z_][A-Za-z0-9_]*$)");
   return std::regex_match(name, identifier);
 }
 
+// Creates a result for client commands that return a status message.
 pebble::ExecutionResult command_result(std::string message) {
   pebble::ExecutionResult result;
   result.message = std::move(message);
@@ -109,9 +121,11 @@ pebble::ExecutionResult command_result(std::string message) {
 
 class ClientSession {
  public:
+  // Sets up a client session using the selected database folder.
   explicit ClientSession(std::filesystem::path data_directory)
       : data_directory_(std::move(data_directory)) {}
 
+  // Opens the database file provided directly by the user.
   void open_file(const std::filesystem::path &path) {
     auto candidate = std::make_unique<pebble::Engine>(path);
     close_current();
@@ -120,6 +134,7 @@ class ClientSession {
     database_path_ = path;
   }
 
+  // Runs a client command or passes SQL through to the active database.
   pebble::ExecutionResult execute(const std::string &sql) {
     auto statement = normalize_statement_whitespace(sql);
     static const std::regex create_database_re(
@@ -142,10 +157,12 @@ class ClientSession {
     return engine_->execute_statement(statement);
   }
 
+  // Returns the active database name for the command prompt.
   std::string database_label() const {
     return database_name_.empty() ? "(none)" : database_name_;
   }
 
+  // Returns the current database details and available features.
   std::string status() const {
     std::ostringstream out;
     out << "Database: " << database_label() << '\n'
@@ -155,6 +172,7 @@ class ClientSession {
     return out.str();
   }
 
+  // Closes the active database.
   void close() { close_current(); }
 
  private:
@@ -163,10 +181,12 @@ class ClientSession {
   std::string database_name_;
   std::unique_ptr<pebble::Engine> engine_;
 
+  // Builds the file path for a named database.
   std::filesystem::path database_file(const std::string &name) const {
     return data_directory_ / (name + ".db");
   }
 
+  // Creates an empty named database in the data folder.
   pebble::ExecutionResult create_database(const std::string &name) {
     if (!valid_database_name(name)) throw std::runtime_error("invalid database name");
     std::error_code ec;
@@ -191,6 +211,7 @@ class ClientSession {
     return command_result("Database '" + name + "' created");
   }
 
+  // Opens an existing named database as the active database.
   pebble::ExecutionResult use_database(const std::string &name) {
     if (!valid_database_name(name)) throw std::runtime_error("invalid database name");
     const auto path = database_file(name);
@@ -207,6 +228,7 @@ class ClientSession {
     return command_result("Database changed to '" + name + "'");
   }
 
+  // Lists named databases found in the data folder.
   pebble::ExecutionResult show_databases() const {
     pebble::ExecutionResult result;
     result.columns = {"Database"};
@@ -234,6 +256,7 @@ class ClientSession {
     return result;
   }
 
+  // Closes and clears the active database, if one is open.
   void close_current() {
     if (engine_ == nullptr) return;
     engine_->close();
@@ -241,6 +264,7 @@ class ClientSession {
   }
 };
 
+// Escapes control characters so values can be printed on one line.
 std::string display_value(const pebble::Value &value) {
   const auto raw = pebble::value_to_string(value);
   std::string escaped;
@@ -262,6 +286,7 @@ std::string display_value(const pebble::Value &value) {
   return escaped;
 }
 
+// Formats table cells while distinguishing NULL values from the text "NULL".
 std::string display_table_value(const pebble::Value &value) {
   if (std::holds_alternative<std::monostate>(value)) return "NULL";
   if (const auto *text = std::get_if<std::string>(&value);
@@ -270,6 +295,7 @@ std::string display_table_value(const pebble::Value &value) {
   return display_value(value);
 }
 
+// Prints query results in a table with columns sized to their contents.
 void print_table(const pebble::ExecutionResult &result) {
   const auto column_count = result.columns.size();
   if (column_count == 0) {
@@ -313,6 +339,7 @@ void print_table(const pebble::ExecutionResult &result) {
                                                               : " rows in set\n");
 }
 
+// Prints query rows or a status message in the selected output style.
 void print_result(const pebble::ExecutionResult &result, bool table_output,
                   bool interactive) {
   if (result.is_query) {
@@ -342,12 +369,14 @@ void print_result(const pebble::ExecutionResult &result, bool table_output,
   }
 }
 
+// Prints the time spent executing a statement.
 void print_timing(std::chrono::steady_clock::duration elapsed) {
   const std::chrono::duration<double, std::milli> milliseconds(elapsed);
   std::cerr << "Execution time: " << std::fixed << std::setprecision(2)
             << milliseconds.count() << " ms (engine; excludes result formatting)\n";
 }
 
+// Runs one statement and reports its result or error.
 bool execute_statement(ClientSession &client, const std::string &statement,
                        bool timing, bool table_output, bool interactive) {
   const auto start = std::chrono::steady_clock::now();
@@ -366,6 +395,7 @@ bool execute_statement(ClientSession &client, const std::string &statement,
   }
 }
 
+// Handles shell commands that are not SQL statements.
 bool meta_command(const std::string &line, ClientSession &client, bool &quit) {
   const auto command = lower(trim(line));
   if (command == "help") {
@@ -385,6 +415,7 @@ bool meta_command(const std::string &line, ClientSession &client, bool &quit) {
   return true;
 }
 
+// Moves complete SQL statements out of the input while respecting quoted text.
 void split_complete_statements(std::string &pending,
                                std::vector<std::string> &statements) {
   char quote = '\0';
@@ -413,6 +444,7 @@ void split_complete_statements(std::string &pending,
   pending = trim(pending.substr(start));
 }
 
+// Checks whether input ends inside a quoted value.
 bool has_open_quote(const std::string &text) {
   char quote = '\0';
   for (std::size_t i = 0; i < text.size(); ++i) {
@@ -442,6 +474,7 @@ struct Options {
   bool table_output{};
 };
 
+// Prints command-line usage information.
 void print_usage(const char *program) {
   std::cout << "Usage: " << program << " [DATABASE_FILE]\n"
             << "       " << program << " --execute SQL [DATABASE_FILE] [--timing]\n"
@@ -452,6 +485,7 @@ void print_usage(const char *program) {
             << "Named databases are stored as .db files with .catalog sidecars.\n";
 }
 
+// Reads command-line arguments and returns the selected run options.
 Options parse_options(int argc, char **argv) {
   Options options;
   for (int i = 1; i < argc; ++i) {
@@ -495,6 +529,7 @@ Options parse_options(int argc, char **argv) {
   return options;
 }
 
+// Runs all complete statements in a script or batch input.
 bool process_batch(std::string text, ClientSession &client, bool timing,
                    bool table_output) {
   std::vector<std::string> statements;
@@ -513,6 +548,7 @@ bool process_batch(std::string text, ClientSession &client, bool timing,
   return succeeded;
 }
 
+// Reads and runs statements until the user exits the interactive shell.
 int run_interactive(ClientSession &client, bool timing) {
   std::string pending;
   bool quit = false;
@@ -564,6 +600,7 @@ int run_interactive(ClientSession &client, bool timing) {
 
 }  // namespace
 
+// Selects the input mode, starts the client, and returns the program status.
 int main(int argc, char **argv) {
   Options options;
   try {
