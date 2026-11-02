@@ -4,7 +4,14 @@
 
 Pebble is currently a Python 3.11+ teaching DBMS with no third-party runtime dependencies. Its 36 implementation modules are under `src/pebble`; 28 test modules cover the storage engine, executors, indexes, and transaction helpers.
 
-The storage path is `DiskManager` → `DiskScheduler` → `BufferPoolManager` → `Page`/`PageGuard` → `SlottedPage`/`TableHeap`. The catalog creates in-memory table and index descriptors. Integer-key B+Tree pages are stored in the same page file. The query path uses pull-based executors for scans, insert, filter, projection, nested-loop and hash joins, aggregation, sorting, and limit. `Database` contains a small regular-expression SQL front end. Transaction objects, an undo log, a transaction manager, and WAL record serialization exist, but restart recovery is incomplete.
+The Python storage path is `DiskManager` → `DiskScheduler` →
+`BufferPoolManager` → `Page`/`PageGuard` → `SlottedPage`/`TableHeap`, with
+integer-key B+Tree indexes stored in the page file. The native runtime keeps
+rows in heap pages but uses a disk-backed LSM tree for INTEGER indexes. The
+query path uses pull-based executors for scans, insert, filter, projection,
+nested-loop and hash joins, aggregation, sorting, and limit. Transaction
+objects, an undo log, a transaction manager, and WAL record serialization
+exist in Python, but restart recovery is incomplete.
 
 The working tree was clean at inspection. The committed `src/pebble/database.py` has an unexpected indent at line 94, so importing the public `Database` API fails before SQL can run. The catalog is not persisted, so closing and reopening preserves page bytes but does not reconstruct table definitions. Recovery redo/undo and parts of the SQL-facing update/delete path are unfinished. `README.md` is not yet usable run documentation.
 
@@ -16,7 +23,7 @@ The working tree was clean at inspection. The committed `src/pebble/database.py`
 | Page storage | 4 KiB pages; linked slotted pages; synchronous file manager | Implemented; page file can be reopened |
 | Buffer management | Pin counts, dirty pages, guards, ARC replacement, queued disk worker | Implemented; Python components are not generally synchronized for concurrent callers |
 | Tables and catalog | Heap scans/inserts; in-memory catalog | Implemented; catalog metadata is lost on restart |
-| Indexes | Unique signed integer B+Tree, split, point lookup, leaf scan, naive leaf delete | Implemented with limited keys and delete balancing |
+| Indexes | Python: unique signed INTEGER B+Tree. Native: unique signed INTEGER LSM index with memtable, SSTables, tombstones, point/range lookup, flush and compaction | Native LSM files are stored per index beside the database. Existing native catalog-v2 indexes are rebuilt from heap rows; Python databases are not imported |
 | Query execution | Scan, insert, filter, projection, joins, aggregation, sort, limit | Mostly implemented as executor APIs; SQL integration is narrower |
 | SQL | CREATE TABLE/INDEX, INSERT, SELECT, equality JOIN, simple predicates, transaction commands | Imports after repairing syntax defects; SQL UPDATE/DELETE/GROUP BY/ORDER BY are not wired into `Database.execute` |
 | Transactions | Begin/commit/abort manager, undo helpers, WAL serialization and analysis | Partial; abort/undo and restart recovery do not provide complete durability guarantees |
@@ -34,7 +41,7 @@ The working tree was clean at inspection. The committed `src/pebble/database.py`
 CLI / SQL front end (C++)
   └─ binder/planner and executors (C++)
        ├─ catalog/schema/tuple (C++)
-       ├─ B+Tree and table heap (C++)
+       ├─ LSM index and table heap (C++)
        │    └─ buffer pool and page guards (C++)
        │         └─ page + disk file operations (C17 ABI)
        └─ transaction/WAL/recovery (C++, only where guarantees are implemented)
@@ -48,7 +55,9 @@ Keep dependencies pointed downward; storage must not depend on SQL or executors.
 2. Establish a native build with separate C and C++ objects and generated header dependencies.
 3. Port page and disk primitives to C; verify byte layouts and error handling.
 4. Port schema, tuple serialization, slotted pages, heap, buffer pool, and guards to C++ with compatibility fixtures.
-5. Port the B+Tree/catalog and query operators; preserve current limits rather than claiming unsupported SQL.
+5. Integrate the native LSM index with catalog and query operations; preserve
+   unique INTEGER behavior and test range lookup, updates, deletes, persistence,
+   and conversion of older native catalogs.
 6. Integrate a native executable and client, and route supported SQL through the actual storage/executor implementation.
 7. Port transaction/WAL behavior only to the extent that existing guarantees can be preserved; do not label analysis-only recovery as crash recovery.
 8. Replace Python tests with native unit and executable-level integration coverage, then remove Python only after feature parity is demonstrated.
@@ -68,7 +77,9 @@ Use standard C17/C++20, `FILE`-based portable I/O or standard C++ facilities beh
 ## Risks and unresolved items
 
 - The current SQL module does not import, so its runtime behavior must be reconstructed from tests and implementation intent rather than treated as a passing baseline.
-- Existing B+Tree indexes are unique INTEGER-only and deletes do not rebalance; widening them would change behavior and format.
+- Python B+Tree indexes and native LSM indexes are unique INTEGER-only;
+  widening keys or allowing duplicates changes SQL behavior and the stored
+  format.
 - The catalog is volatile, so preserving data across database reopen requires a new metadata persistence design.
 - WAL commit/abort and recovery helpers are incomplete; integration must not imply crash safety that the code does not provide.
 - The available environment is macOS with Apple Clang and GNU Make 3.81. Linux native validation requires CI or another host.
@@ -76,6 +87,9 @@ Use standard C17/C++20, `FILE`-based portable I/O or standard C++ facilities beh
 
 
 ## Implementation checkpoint (2026-10-27)
+
+Historical checkpoint before the native index migration described at the end
+of this document.
 
 The native checkpoint is implemented. native/c/storage.c and its public header
 provide page-file allocation, read/write, page count, and close through a C17
@@ -151,3 +165,28 @@ The engine still has no transaction/undo/WAL/recovery support, disk-backed
 external sorting, modular Volcano executor API, or legacy Python catalog
 discovery. Multi-row DML is not atomic when storage I/O fails. These items
 remain required before claiming feature parity or transactional durability.
+
+### Native LSM index migration (2026-11-02)
+
+The native unique INTEGER index is now an LSM tree; the Python implementation
+retains its B+Tree. Heap-row page storage and SQL behavior are unchanged. Each
+native index is stored in `DATABASE_FILE.lsm/INDEX_NAME` using a sorted
+in-memory memtable, immutable sorted SSTables, per-entry sequence numbers,
+tombstones, and a text manifest. Memtables flush at capacity and on database
+close. Once four runs exist, compaction merges them, preserves the newest
+entry for each key, and removes obsolete tombstones. Point lookup, ordered
+range scan, unique-key insertion, delete, update, and indexed predicates use
+the LSM implementation.
+
+Native catalog version 2 is upgraded to version 3 by rebuilding its indexes
+from the existing heap rows. Old B+Tree pages remain unused in the page file.
+The standalone LSM tests cover signed integer boundaries, range bounds,
+uniqueness, tombstones, reinsertion, flush/reopen, compaction, and randomized
+operations against an ordered-map reference. Native SQL tests exercise the
+engine integration and catalog migration.
+
+This is an educational index implementation, not a crash-safe design: there
+is no WAL or filesystem sync protocol, and buffered index changes may be lost
+on abrupt failure. Heap/index DML is not atomic. Range scans and compaction
+currently materialize run contents in memory. There are no Bloom filters,
+sparse SSTable indexes, or benchmark claims.

@@ -34,9 +34,10 @@ class Engine {
   Engine(Engine &&) = delete;
   Engine &operator=(Engine &&) = delete;
 
-  // Supported: CREATE TABLE/INDEX, INSERT, literal UPDATE/DELETE, and SELECT
-  // with one equality JOIN, WHERE, GROUP BY aggregates, ORDER BY, LIMIT, and
-  // OFFSET. SHOW TABLES and DESCRIBE are supported. Unsupported SQL raises.
+  // Supported: CREATE/DROP TABLE, CREATE INDEX, INSERT, literal UPDATE/DELETE,
+  // and SELECT with one equality JOIN, WHERE, GROUP BY aggregates, ORDER BY,
+  // LIMIT, and OFFSET. SHOW TABLES and DESCRIBE are supported. Unsupported SQL
+  // raises.
   std::vector<Row> execute(const std::string &sql);
   ExecutionResult execute_statement(const std::string &sql);
   void close();

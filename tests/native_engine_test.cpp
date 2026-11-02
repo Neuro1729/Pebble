@@ -8,8 +8,11 @@
 #include <cassert>
 #include <chrono>
 #include <filesystem>
+#include <fstream>
 #include <stdexcept>
 #include <cstring>
+#include <string>
+#include <vector>
 
 int main() {
   const auto nonce = std::chrono::steady_clock::now().time_since_epoch().count();
@@ -38,33 +41,14 @@ int main() {
   assert(pb_disk_read_page(disk, page_id, &page, error, sizeof(error)) == PB_STATUS_OK);
   assert(std::memcmp(page.data + 137, "Pebble", 6) == 0);
   assert(pb_disk_read_page(disk, -1, &page, error, sizeof(error)) == PB_STATUS_INVALID_ARGUMENT);
-  auto tree = pebble::BPlusTree::create(disk);
-  for (int i = -175; i < 175; ++i)
-    tree.insert(i, pebble::RecordId{0, static_cast<std::uint16_t>(i + 175)});
-  const auto tree_root = tree.root_page_id();
-  assert(tree_root != 1);
-  assert(tree.search(-175).has_value());
-  assert(tree.search(174).has_value());
-  const auto range = tree.scan(-5, 5);
-  assert(range.size() == 11 && range.front().first == -5 && range.back().first == 5);
-  assert(tree.erase(0));
-  assert(!tree.search(0).has_value());
-  auto tiny_tree = pebble::BPlusTree::create(disk, 3, 4);
-  for (int i = 0; i < 60; ++i)
-    tiny_tree.insert(i, pebble::RecordId{0, static_cast<std::uint16_t>(i)});
-  for (int i = 0; i < 60; ++i) assert(tiny_tree.search(i).has_value());
-  assert(tiny_tree.scan(20, 29).size() == 10);
   assert(pb_disk_close(disk, error, sizeof(error)) == PB_STATUS_OK);
   disk = pb_disk_open(raw_path.string().c_str(), &status, error, sizeof(error));
   assert(status == PB_STATUS_OK && disk != nullptr);
   std::uint32_t page_count = 0;
   assert(pb_disk_page_count(disk, &page_count, error, sizeof(error)) == PB_STATUS_OK);
-  assert(page_count >= 4);
+  assert(page_count >= 1);
   assert(pb_disk_read_page(disk, page_id, &page, error, sizeof(error)) == PB_STATUS_OK);
   assert(std::memcmp(page.data + 137, "Pebble", 6) == 0);
-  pebble::BPlusTree reopened_tree(disk, tree_root);
-  assert(reopened_tree.search(174).has_value());
-  assert(!reopened_tree.search(0).has_value());
   assert(pb_disk_close(disk, error, sizeof(error)) == PB_STATUS_OK);
   std::filesystem::remove(raw_path, ignored);
 
@@ -292,7 +276,53 @@ int main() {
     db.close();
   }
 
+  auto legacy_base = base;
+  legacy_base += ".legacy";
+  auto legacy_catalog = legacy_base;
+  legacy_catalog += ".catalog";
+  auto legacy_lsm = legacy_base;
+  legacy_lsm += ".lsm";
+  {
+    pebble::Engine db(legacy_base);
+    db.execute("CREATE TABLE legacy (id INTEGER, value VARCHAR)");
+    db.execute("INSERT INTO legacy VALUES (1, 'one'), (2, 'two')");
+    db.execute("CREATE INDEX legacy_id ON legacy (id)");
+    db.close();
+  }
+  {
+    std::ifstream in(legacy_catalog);
+    std::vector<std::string> lines;
+    for (std::string line; std::getline(in, line);)
+      lines.push_back(std::move(line));
+    assert(lines.size() == 6);
+    lines[0] = "PEBBLE_CATALOG 2";
+    lines.back() += " 1";
+    std::ofstream out(legacy_catalog, std::ios::trunc);
+    for (const auto &line : lines) out << line << '\n';
+    assert(out.good());
+  }
+  std::filesystem::remove_all(legacy_lsm, ignored);
+  {
+    pebble::Engine migrated(legacy_base);
+    const auto rows = migrated.execute("SELECT value FROM legacy WHERE id >= 2");
+    assert(rows.size() == 1);
+    assert(pebble::value_to_string(rows[0][0]) == "two");
+    migrated.close();
+  }
+  {
+    std::ifstream in(legacy_catalog);
+    std::string header;
+    assert(std::getline(in, header));
+    assert(header == "PEBBLE_CATALOG 3");
+  }
+
   std::filesystem::remove(base, ignored);
   std::filesystem::remove(catalog, ignored);
+  auto base_lsm = base;
+  base_lsm += ".lsm";
+  std::filesystem::remove_all(base_lsm, ignored);
+  std::filesystem::remove(legacy_base, ignored);
+  std::filesystem::remove(legacy_catalog, ignored);
+  std::filesystem::remove_all(legacy_lsm, ignored);
   return 0;
 }

@@ -140,6 +140,9 @@ class ClientSession {
     static const std::regex create_database_re(
         R"(^CREATE\s+DATABASE\s+([A-Za-z_][A-Za-z0-9_]*)\s*$)",
         std::regex::icase);
+    static const std::regex drop_database_re(
+        R"(^DROP\s+DATABASE\s+([A-Za-z_][A-Za-z0-9_]*)\s*$)",
+        std::regex::icase);
     static const std::regex use_re(
         R"(^USE\s+([A-Za-z_][A-Za-z0-9_]*)\s*$)", std::regex::icase);
     static const std::regex show_databases_re(
@@ -148,6 +151,8 @@ class ClientSession {
 
     if (std::regex_match(statement, match, create_database_re))
       return create_database(match[1].str());
+    if (std::regex_match(statement, match, drop_database_re))
+      return drop_database(match[1].str());
     if (std::regex_match(statement, match, use_re))
       return use_database(match[1].str());
     if (std::regex_match(statement, show_databases_re))
@@ -211,7 +216,44 @@ class ClientSession {
     return command_result("Database '" + name + "' created");
   }
 
-  // Opens an existing named database as the active database.
+  pebble::ExecutionResult drop_database(const std::string &name) {
+    if (!valid_database_name(name)) throw std::runtime_error("invalid database name");
+    const auto path = database_file(name);
+    auto catalog_path = path;
+    catalog_path += ".catalog";
+    if (!std::filesystem::is_regular_file(path) ||
+        !std::filesystem::is_regular_file(catalog_path))
+      throw std::runtime_error("database does not exist: " + name);
+
+    const auto active_path = database_path_.is_absolute()
+                                 ? database_path_.lexically_normal()
+                                 : std::filesystem::absolute(database_path_).lexically_normal();
+    const auto target_path = path.is_absolute()
+                                 ? path.lexically_normal()
+                                 : std::filesystem::absolute(path).lexically_normal();
+    if (engine_ != nullptr && active_path == target_path) {
+      close_current();
+      database_name_.clear();
+      database_path_.clear();
+    }
+
+    auto index_path = path;
+    index_path += ".lsm";
+    std::error_code ec;
+    std::filesystem::remove_all(index_path, ec);
+    if (ec)
+      throw std::runtime_error("cannot remove database indexes: " + ec.message());
+    const auto temp_catalog_path =
+        std::filesystem::path(catalog_path.string() + ".tmp");
+    for (const auto &file : {path, catalog_path, temp_catalog_path}) {
+      if (!std::filesystem::remove(file, ec) && ec)
+        throw std::runtime_error("cannot remove database file " + file.string() +
+                                 ": " + ec.message());
+      ec.clear();
+    }
+    return command_result("Database '" + name + "' dropped");
+  }
+
   pebble::ExecutionResult use_database(const std::string &name) {
     if (!valid_database_name(name)) throw std::runtime_error("invalid database name");
     const auto path = database_file(name);
@@ -400,7 +442,7 @@ bool meta_command(const std::string &line, ClientSession &client, bool &quit) {
   const auto command = lower(trim(line));
   if (command == "help") {
     std::cout << "Client commands: help, status, clear, exit, quit\n"
-              << "SQL commands: CREATE DATABASE, USE, SHOW DATABASES, "
+              << "SQL commands: CREATE DATABASE, DROP DATABASE, USE, SHOW DATABASES, "
                  "SHOW TABLES, DESCRIBE, and supported Pebble SQL.\n"
               << "Finish SQL statements with a semicolon.\n";
   } else if (command == "status") {

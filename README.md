@@ -6,11 +6,11 @@ portable page-file operations and C++20 for the DBMS runtime.
 
 The native executable supports CREATE TABLE, CREATE INDEX on one INTEGER
 column, multi-row INSERT, literal UPDATE/DELETE predicates, equality joins,
-GROUP BY aggregates, ORDER BY, LIMIT, and OFFSET. It stores rows and unique-key
-B+Tree indexes in 4 KiB pages, caches pages with ARC replacement and RAII
-guards, and persists catalog metadata in a versioned .catalog sidecar file.
-Disk-backed run spilling, transactions, and recovery are not implemented in the
-native runtime yet.
+GROUP BY aggregates, ORDER BY, LIMIT, and OFFSET. It stores rows in 4 KiB heap
+pages and unique-key indexes in a disk-backed LSM tree with a sorted memtable,
+SSTables, tombstones, and compaction. Catalog metadata is persisted in a
+versioned `.catalog` sidecar file. Disk-backed query-sort spilling,
+transactions, and recovery are not implemented in the native runtime yet.
 
 See [RUNNING.md](RUNNING.md) for prerequisites, build commands, supported SQL,
 testing, shell and batch usage, and limitations. Build and start the client with

@@ -62,6 +62,8 @@ $(DBMS): $(CXX_OBJECTS) $(LIBRARY)
 test: $(DBMS) $(TEST_OBJECTS)
 	$(CXX) $(CPPFLAGS) $(CXXFLAGS) $(WARNFLAGS) $(TEST_MODEFLAGS) $(THREADFLAGS) -std=c++20 tests/native_engine_test.cpp $(TEST_OBJECTS) $(LIBRARY) $(LDFLAGS) $(LDLIBS) -o $(BUILD_DIR)/bin/native_engine_test
 	$(BUILD_DIR)/bin/native_engine_test
+	$(CXX) $(CPPFLAGS) $(CXXFLAGS) $(WARNFLAGS) $(TEST_MODEFLAGS) $(THREADFLAGS) -std=c++20 tests/native_lsm_test.cpp $(TEST_OBJECTS) $(LIBRARY) $(LDFLAGS) $(LDLIBS) -o $(BUILD_DIR)/bin/native_lsm_test
+	$(BUILD_DIR)/bin/native_lsm_test
 	sh tests/native_integration.sh "$(DBMS)"
 
 check: test
