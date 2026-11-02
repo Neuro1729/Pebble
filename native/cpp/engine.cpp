@@ -34,7 +34,7 @@ struct Column {
 struct IndexInfo {
   std::string name;
   std::size_t column_index;
-  std::int32_t root_page_id;
+  std::unique_ptr<LSMTree> tree;
 };
 struct Table {
   std::string name;
@@ -389,6 +389,8 @@ struct Engine::Impl {
 
   void close() {
     if (closed) return;
+    for (auto &table : tables)
+      for (auto &index : table.indexes) index.tree->flush();
     save_catalog();
     buffer_pool->flush_all_pages();
     buffer_pool.reset();
@@ -401,6 +403,12 @@ struct Engine::Impl {
 
   void check_open() const {
     if (closed || disk == nullptr) throw std::runtime_error("database is closed");
+  }
+
+  std::filesystem::path index_directory(const std::string &name) const {
+    auto path = database_path;
+    path += ".lsm";
+    return path / name;
   }
 
   Table &get_table(const std::string &name) {
@@ -420,7 +428,7 @@ struct Engine::Impl {
     std::string magic;
     unsigned version{};
     if (!(in >> magic >> version) || magic != "PEBBLE_CATALOG" ||
-        (version != 1 && version != 2))
+        version < 1 || version > 3)
       throw std::runtime_error("unsupported or corrupt catalog file: " + catalog_path.string());
     std::size_t table_count{};
     if (!(in >> table_count)) throw std::runtime_error("corrupt catalog table count");
@@ -429,7 +437,7 @@ struct Engine::Impl {
       std::size_t column_count{};
       std::size_t index_count{};
       if (!(in >> std::quoted(table.name) >> table.first_page >> table.last_page >> column_count) ||
-          (version == 2 && !(in >> index_count)))
+          (version >= 2 && !(in >> index_count)))
         throw std::runtime_error("corrupt catalog table record");
       if (table.first_page < 0 || table.last_page < 0 || column_count == 0)
         throw std::runtime_error("invalid catalog table metadata");
@@ -440,14 +448,38 @@ struct Engine::Impl {
         table.columns.push_back({name, type == "I" ? Type::Integer : Type::Varchar});
       }
       for (std::size_t i = 0; i < index_count; ++i) {
-        IndexInfo index{};
-        if (!(in >> std::quoted(index.name) >> index.column_index >> index.root_page_id) ||
-            index.column_index >= table.columns.size() || index.root_page_id < 0 ||
-            table.columns[index.column_index].type != Type::Integer)
+        IndexInfo index{.name = {}, .column_index = 0, .tree = nullptr};
+        std::int32_t legacy_root{};
+        if (!(in >> std::quoted(index.name) >> index.column_index) ||
+            (version == 2 && !(in >> legacy_root)) ||
+            index.column_index >= table.columns.size() ||
+            table.columns[index.column_index].type != Type::Integer ||
+            (version == 2 && legacy_root < 0))
           throw std::runtime_error("corrupt catalog index record");
+        if (version == 3)
+          index.tree =
+              std::make_unique<LSMTree>(index_directory(index.name), 128, false);
         table.indexes.push_back(std::move(index));
       }
       tables.push_back(std::move(table));
+    }
+    if (version == 2) {
+      for (auto &table : tables) {
+        for (auto &index : table.indexes) {
+          const auto directory = index_directory(index.name);
+          std::error_code error;
+          std::filesystem::remove_all(directory, error);
+          if (error)
+            throw std::runtime_error("cannot prepare LSM index migration at " +
+                                     directory.string() + ": " + error.message());
+          index.tree = std::make_unique<LSMTree>(directory);
+          for (const auto &[rid, row] : scan_records(table))
+            index.tree->insert(
+                std::get<std::int32_t>(row[index.column_index]), rid);
+          index.tree->flush();
+        }
+      }
+      save_catalog();
     }
   }
 
@@ -459,7 +491,7 @@ struct Engine::Impl {
     {
       std::ofstream out(temp_path, std::ios::trunc);
       if (!out) throw std::runtime_error("cannot write catalog: " + temp_path.string());
-      out << "PEBBLE_CATALOG 2\n" << tables.size() << '\n';
+      out << "PEBBLE_CATALOG 3\n" << tables.size() << '\n';
       for (const auto &table : tables) {
         out << std::quoted(table.name) << ' ' << table.first_page << ' '
             << table.last_page << ' ' << table.columns.size() << ' '
@@ -468,8 +500,7 @@ struct Engine::Impl {
           out << std::quoted(column.name) << ' '
               << (column.type == Type::Integer ? "I" : "V") << '\n';
         for (const auto &index : table.indexes)
-          out << std::quoted(index.name) << ' ' << index.column_index << ' '
-              << index.root_page_id << '\n';
+          out << std::quoted(index.name) << ' ' << index.column_index << '\n';
       }
       out.flush();
       if (!out) throw std::runtime_error("writing catalog failed");
@@ -531,15 +562,13 @@ struct Engine::Impl {
     const auto bytes = encode_row(table, row);
     for (const auto &index : table.indexes) {
       const auto key = std::get<std::int32_t>(row[index.column_index]);
-      if (BPlusTree(disk, index.root_page_id, buffer_pool.get()).search(key).has_value())
+      if (index.tree->search(key).has_value())
         throw std::runtime_error("duplicate index key: " + std::to_string(key));
     }
     const auto rid = insert_heap(table, bytes);
     for (auto &index : table.indexes) {
       const auto key = std::get<std::int32_t>(row[index.column_index]);
-      BPlusTree tree(disk, index.root_page_id, buffer_pool.get());
-      tree.insert(key, rid);
-      index.root_page_id = tree.root_page_id();
+      index.tree->insert(key, rid);
     }
     save_catalog();
     return rid;
@@ -629,6 +658,45 @@ struct Engine::Impl {
         R"(^CREATE\s+TABLE\s+(\w+)\s*\((.+)\)\s*$)",
         std::regex::icase);
     std::smatch match;
+    static const std::regex drop_table(
+        R"(^DROP\s+TABLE\s+(\w+)\s*$)", std::regex::icase);
+    if (std::regex_match(statement, match, drop_table)) {
+      const auto table_name = match[1].str();
+      const auto it = std::find_if(tables.begin(), tables.end(),
+                                   [&](const Table &table) {
+                                     return table.name == table_name;
+                                   });
+      if (it == tables.end())
+        throw std::runtime_error("table not found: " + table_name);
+
+      std::vector<std::filesystem::path> index_directories;
+      index_directories.reserve(it->indexes.size());
+      for (const auto &index : it->indexes)
+        index_directories.push_back(index_directory(index.name));
+      const auto position = static_cast<std::size_t>(it - tables.begin());
+      Table removed = std::move(*it);
+      tables.erase(it);
+      try {
+        save_catalog();
+      } catch (...) {
+        tables.insert(tables.begin() + static_cast<std::ptrdiff_t>(position),
+                      std::move(removed));
+        throw;
+      }
+
+      removed.indexes.clear();
+      for (const auto &directory : index_directories) {
+        std::error_code error;
+        std::filesystem::remove_all(directory, error);
+        if (error)
+          throw std::runtime_error("cannot remove LSM index directory " +
+                                   directory.string() + ": " + error.message());
+      }
+      ExecutionResult result;
+      result.message = "Table '" + table_name + "' dropped";
+      return result;
+    }
+
     if (std::regex_match(statement, match, create_table)) {
       const auto name = match[1].str();
       if (std::any_of(tables.begin(), tables.end(), [&](const Table &t) { return t.name == name; }))
@@ -696,11 +764,19 @@ struct Engine::Impl {
       const auto index_column = column_index(table, column_name);
       if (table.columns[index_column].type != Type::Integer)
         throw std::runtime_error("index key column must be INTEGER");
-      auto tree = BPlusTree::create(disk, buffer_pool.get());
+      const auto directory = index_directory(index_name);
+      std::error_code remove_error;
+      std::filesystem::remove_all(directory, remove_error);
+      if (remove_error)
+        throw std::runtime_error("cannot prepare LSM index directory " +
+                                 directory.string() + ": " +
+                                 remove_error.message());
+      auto tree = std::make_unique<LSMTree>(directory);
       for (const auto &[rid, row] : scan_records(table)) {
-        tree.insert(std::get<std::int32_t>(row[index_column]), rid);
+        tree->insert(std::get<std::int32_t>(row[index_column]), rid);
       }
-      table.indexes.push_back({index_name, index_column, tree.root_page_id()});
+      tree->flush();
+      table.indexes.push_back({index_name, index_column, std::move(tree)});
       save_catalog();
       return {};
     }
@@ -718,10 +794,9 @@ struct Engine::Impl {
       for (const auto rid : victims) {
         const auto row = get_record(table, rid);
         for (auto &index : table.indexes) {
-          BPlusTree tree(disk, index.root_page_id, buffer_pool.get());
           const auto key = std::get<std::int32_t>(row[index.column_index]);
-          if (!tree.erase(key)) throw std::runtime_error("missing index entry during DELETE");
-          index.root_page_id = tree.root_page_id();
+          if (!index.tree->erase(key))
+            throw std::runtime_error("missing index entry during DELETE");
         }
       }
       for (const auto rid : victims) mark_deleted(rid);
@@ -820,18 +895,15 @@ struct Engine::Impl {
       // unique-key swaps do not conflict with their old values.
       for (const auto &change : changes) {
         for (auto &index : table.indexes) {
-          BPlusTree tree(disk, index.root_page_id, buffer_pool.get());
           const auto key = std::get<std::int32_t>(change.old_row[index.column_index]);
-          if (!tree.erase(key)) throw std::runtime_error("missing index entry during UPDATE");
-          index.root_page_id = tree.root_page_id();
+          if (!index.tree->erase(key))
+            throw std::runtime_error("missing index entry during UPDATE");
         }
       }
       for (const auto &change : changes) {
         for (auto &index : table.indexes) {
-          BPlusTree tree(disk, index.root_page_id, buffer_pool.get());
           const auto key = std::get<std::int32_t>(change.new_row[index.column_index]);
-          tree.insert(key, change.new_rid);
-          index.root_page_id = tree.root_page_id();
+          index.tree->insert(key, change.new_rid);
         }
       }
       save_catalog();
@@ -914,7 +986,7 @@ struct Engine::Impl {
             const auto indexed = std::find_if(left.indexes.begin(), left.indexes.end(),
                 [&](const IndexInfo &index) { return index.column_index == column; });
             if (indexed != left.indexes.end()) {
-              const BPlusTree tree(disk, indexed->root_page_id, buffer_pool.get());
+              const auto &tree = *indexed->tree;
               std::vector<std::pair<std::int32_t, RecordId>> matches;
               if (op == "=") {
                 const auto rid = tree.search(*key);

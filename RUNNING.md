@@ -25,8 +25,9 @@ uv sync --extra dev
 - native/cpp/engine.cpp and native/include/pebble/engine.hpp: C++20 tuple,
   heap, catalog, and SQL runtime.
 - native/cpp/main.cpp and scripts/dbms: interactive and batch client.
-- native/cpp/index.cpp and native/include/pebble/index.hpp: persistent
-  unique INTEGER B+Tree indexes using Pebble's existing index page layout.
+- native/cpp/index.cpp and native/include/pebble/index.hpp: unique INTEGER
+  LSM-tree indexes with an in-memory memtable, sorted SSTables, tombstones,
+  range scans, flush, and compaction.
 - native/cpp/main.cpp: dbms command-line entry point.
 - src/pebble/: original Python storage, index, executor, transaction, WAL,
   and recovery modules; many are not yet migrated into the native runtime.
@@ -36,7 +37,10 @@ uv sync --extra dev
 
 Native rows are stored in 4096-byte pages. Catalog metadata lives in a
 versioned DATABASE_FILE.catalog sidecar because the Python catalog was only
-in memory.
+in memory. Each native index has its own `DATABASE_FILE.lsm/INDEX_NAME`
+directory containing a manifest and immutable SSTables. Existing native
+catalog-v2 B+Tree indexes are rebuilt from heap rows when opened and the
+catalog is upgraded to version 3. Python B+Tree databases are not imported.
 
 ## C. Build instructions
 
@@ -88,6 +92,8 @@ INSERT INTO students VALUES (1, 'Ada'), (2, 'Grace');
 SELECT id, name FROM students;
 SHOW TABLES;
 DESCRIBE students;
+DROP TABLE students;
+DROP DATABASE college;
 ```
 
 The prompt accepts multiline statements and only splits on semicolons outside
@@ -115,14 +121,16 @@ statement to stderr, including failed engine statements, and leaves result
 stdout unchanged. The measured interval covers client dispatch and engine
 execution, but excludes result formatting and time waiting for shell input.
 
-Native SQL supports CREATE TABLE, CREATE INDEX on one INTEGER column,
+Native SQL supports CREATE TABLE, DROP TABLE, CREATE INDEX on one INTEGER column,
 multi-row INSERT, SELECT projection, one equality JOIN, one simple WHERE
 comparison, literal UPDATE and DELETE, GROUP BY, COUNT/SUM/AVG/MIN/MAX,
-ORDER BY, LIMIT, and OFFSET. The client also supports CREATE DATABASE, USE,
+ORDER BY, LIMIT, and OFFSET. The client also supports CREATE/DROP DATABASE, USE,
 SHOW DATABASES, SHOW TABLES, and DESCRIBE. DML supports one simple WHERE
 comparison and literal assignments. VARCHAR length declarations such as
 `VARCHAR(100)` are not supported; use `VARCHAR`. Aggregate calls do not
 support aliases.
+`DROP TABLE` removes the table metadata and its index files, but its heap pages
+remain allocated in the database file.
 ORDER BY on grouped/aggregate queries must refer to a selected expression.
 Sorting uses in-memory runs and a k-way merge; it does not spill runs to disk.
 Keywords are case-insensitive and identifiers are case-sensitive. Empty
@@ -160,10 +168,10 @@ beside the page file. To choose a named database directory, use
 ## F. Testing and troubleshooting
 
 make test exercises C page-file allocation/read/write/reopen, ARC replacement,
-buffer-pool pinning/eviction/dirty flushing, B+Tree leaf and internal splits,
-index lookup and persistence, C++ SQL filtering, aggregation, ordering, limits,
-indexed UPDATE/DELETE, and the actual executable for joins and invalid-column
-errors.
+buffer-pool pinning/eviction/dirty flushing, LSM point/range lookup, duplicate
+checks, tombstones, flush/reopen, compaction, randomized reference-model
+operations, catalog-v2 index rebuilding, C++ SQL filtering, aggregation,
+ordering, limits, indexed UPDATE/DELETE, and executable-level integration.
 Use make clean to remove build outputs. If uv sync cannot download pytest,
 check Python 3.11+ and package-index connectivity.
 
@@ -191,6 +199,14 @@ autocommit policy, rollback, isolation, or crash-recovery guarantee. DML writes
 directly to storage, so an I/O error during a multi-row statement can leave
 partial work. Concurrent writers are not coordinated. The client does not
 offer transaction commands.
+
+LSM index mutations are buffered in memory until the memtable limit is reached
+or the database closes. SSTables and the manifest are replaced through
+temporary files, but there is no WAL or filesystem sync protocol; abrupt
+failure can lose recent index changes or leave heap and index state
+inconsistent. Compaction currently merges all runs for an index and range
+scans materialize run contents in memory. There are no Bloom filters or sparse
+SSTable indexes, and no performance improvement is claimed.
 
 Sort and grouping are in-memory operations; there is no configurable sort
 budget, spill-run format, or temporary-run lifecycle. The query path returns

@@ -107,6 +107,21 @@ test "$result" = "OK
 students
 id | INTEGER
 name | VARCHAR"
+"$dbms" --database-dir "$tmp_dir/named" --execute \
+  "USE college; CREATE INDEX students_id ON students (id); DROP TABLE students" >/dev/null
+test ! -e "$tmp_dir/named/college.db.lsm/students_id"
+result=$("$dbms" --database-dir "$tmp_dir/named" --execute "USE college; SHOW TABLES")
+test "$result" = "OK
+OK"
+"$dbms" --database-dir "$tmp_dir/named" --execute \
+  "USE college; CREATE TABLE students (id INTEGER, name VARCHAR); CREATE INDEX students_id ON students (id); DROP DATABASE college" >/dev/null
+test ! -e "$tmp_dir/named/college.db"
+test ! -e "$tmp_dir/named/college.db.catalog"
+test ! -e "$tmp_dir/named/college.db.lsm"
+if "$dbms" --database-dir "$tmp_dir/named" --execute "USE college" >/dev/null 2>&1; then
+  echo "dropped database unexpectedly remained available" >&2
+  exit 1
+fi
 
 # Timing stays on stderr, is emitted per executed statement, and covers errors.
 timing_stdout=$("$dbms" --execute "SELECT name FROM people WHERE id = 2" "$db" --timing 2>"$tmp_dir/timing.err")
