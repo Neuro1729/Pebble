@@ -1,3 +1,7 @@
+// Implements Pebble's native database engine: SQL statement handling, table
+// storage and catalog persistence, plus query operations such as filtering,
+// joins, grouping, sorting, and indexed lookups.
+
 #include "pebble/engine.hpp"
 #include "pebble/buffer_pool.hpp"
 #include "pebble/index.hpp"
@@ -44,12 +48,14 @@ struct Table {
   std::vector<IndexInfo> indexes;
 };
 
+// Converts storage-layer failures into errors the engine can report.
 void require_status(pb_status status, const char *error) {
   if (status != PB_STATUS_OK) {
     throw std::runtime_error(std::string(pb_status_name(status)) + ": " + error);
   }
 }
 
+// Removes whitespace around user-provided SQL text.
 std::string trim(std::string value) {
   const auto first = value.find_first_not_of(" \t\r\n");
   if (first == std::string::npos) return {};
@@ -57,6 +63,7 @@ std::string trim(std::string value) {
   return value.substr(first, last - first + 1);
 }
 
+// Normalizes text for case-insensitive SQL keyword checks.
 std::string upper(std::string value) {
   std::transform(value.begin(), value.end(), value.begin(), [](unsigned char c) {
     return static_cast<char>(std::toupper(c));
@@ -64,6 +71,7 @@ std::string upper(std::string value) {
   return value;
 }
 
+// Separates comma-delimited SQL items without splitting quoted string values.
 std::vector<std::string> split_commas(const std::string &text) {
   std::vector<std::string> result;
   std::string current;
@@ -91,6 +99,7 @@ std::vector<std::string> split_commas(const std::string &text) {
   return result;
 }
 
+// Turns a supported SQL literal into a value the engine can store or compare.
 Value parse_value(const std::string &raw) {
   const auto text = trim(raw);
   if (text.size() >= 2 && text.front() == '\'' && text.back() == '\'') {
@@ -115,23 +124,28 @@ Value parse_value(const std::string &raw) {
   return value;
 }
 
+// Writes a 16-bit value in the byte order used by page metadata.
 void put_u16(std::uint8_t *out, std::uint16_t value) {
   out[0] = static_cast<std::uint8_t>(value);
   out[1] = static_cast<std::uint8_t>(value >> 8);
 }
+// Writes a 32-bit value in the byte order used by stored rows.
 void put_u32(std::uint8_t *out, std::uint32_t value) {
   for (unsigned i = 0; i < 4; ++i) out[i] = static_cast<std::uint8_t>(value >> (8 * i));
 }
+// Reads a 16-bit value from page metadata.
 std::uint16_t get_u16(const std::uint8_t *in) {
   return static_cast<std::uint16_t>(in[0]) |
          static_cast<std::uint16_t>(static_cast<std::uint16_t>(in[1]) << 8);
 }
+// Reads a 32-bit value from stored page data.
 std::uint32_t get_u32(const std::uint8_t *in) {
   std::uint32_t value = 0;
   for (unsigned i = 0; i < 4; ++i) value |= static_cast<std::uint32_t>(in[i]) << (8 * i);
   return value;
 }
 
+// Converts a typed row into the byte representation stored in table pages.
 std::vector<std::uint8_t> encode_row(const Table &table, const Row &row) {
   if (row.size() != table.columns.size()) throw std::runtime_error("wrong number of values");
   std::vector<std::uint8_t> bytes;
@@ -158,6 +172,7 @@ std::vector<std::uint8_t> encode_row(const Table &table, const Row &row) {
   return bytes;
 }
 
+// Restores a stored tuple to the values used by query processing.
 Row decode_row(const Table &table, const std::uint8_t *data, std::size_t length) {
   Row row;
   std::size_t offset = 0;
@@ -183,6 +198,7 @@ Row decode_row(const Table &table, const std::uint8_t *data, std::size_t length)
   return row;
 }
 
+// Prepares an empty page to hold table records.
 void init_slotted_page(pb_page &page, std::int32_t next = PB_INVALID_PAGE_ID) {
   pb_page_init(&page, page.page_id);
   put_u32(page.data, static_cast<std::uint32_t>(next));
@@ -190,10 +206,12 @@ void init_slotted_page(pb_page &page, std::int32_t next = PB_INVALID_PAGE_ID) {
   put_u16(page.data + 6, static_cast<std::uint16_t>(PB_PAGE_SIZE));
 }
 
+// Identifies the next page in a table's linked page sequence.
 std::int32_t next_page(const pb_page &page) {
   return static_cast<std::int32_t>(get_u32(page.data));
 }
 
+// Provides a consistent ordering for values used by predicates and query operators.
 int compare_values(const Value &left, const Value &right) {
   if (left.index() != right.index())
     throw std::runtime_error("cannot compare values of different types");
@@ -216,6 +234,7 @@ int compare_values(const Value &left, const Value &right) {
 }
 
 struct ValueVectorLess {
+  // Orders group keys so matching rows share the same group.
   bool operator()(const std::vector<Value> &left,
                   const std::vector<Value> &right) const {
     const auto common = std::min(left.size(), right.size());
@@ -238,6 +257,7 @@ struct AggregateState {
   std::optional<Value> minimum;
   std::optional<Value> maximum;
 
+  // Includes one input row in this aggregate's running result.
   void add(const AggregateSpec &spec, const Row &row) {
     if (spec.operation == "COUNT" && !spec.column) {
       ++count;
@@ -264,6 +284,7 @@ struct AggregateState {
     ++count;
   }
 
+  // Produces the final value for a completed aggregate.
   Value finish(const std::string &operation) const {
     if (operation == "COUNT") return count;
     if (operation == "SUM") return total;
@@ -277,6 +298,7 @@ struct AggregateState {
   }
 };
 
+// Compares rows using the requested sort columns and directions.
 int compare_rows(const Row &left, const Row &right,
                  const std::vector<std::size_t> &columns,
                  const std::vector<bool> &descending) {
@@ -287,6 +309,7 @@ int compare_rows(const Row &left, const Row &right,
   return 0;
 }
 
+// Sorts result rows while preserving the requested ordering for equal keys.
 std::vector<Row> merge_sort_rows(std::vector<Row> rows,
                                  const std::vector<std::size_t> &columns,
                                  const std::vector<bool> &descending) {
@@ -312,6 +335,7 @@ std::vector<Row> merge_sort_rows(std::vector<Row> rows,
     const std::vector<std::vector<Row>> *runs;
     const std::vector<std::size_t> *columns;
     const std::vector<bool> *descending;
+    // Keeps the next row in sorted order at the front of the merge queue.
     bool operator()(const Cursor &left, const Cursor &right) const {
       const auto cmp = compare_rows((*runs)[left.run][left.position],
                                     (*runs)[right.run][right.position],
@@ -335,8 +359,11 @@ std::vector<Row> merge_sort_rows(std::vector<Row> rows,
   }
   return sorted;
 }
+// Reports how many record locations are present in a page.
 std::uint16_t slot_count(const pb_page &page) { return get_u16(page.data + 4); }
+// Reports where available record space begins in a page.
 std::uint16_t free_top(const pb_page &page) { return get_u16(page.data + 6); }
+// Returns the stored location and length for a record slot.
 std::pair<std::uint16_t, std::uint16_t> slot_at(const pb_page &page, std::uint16_t slot) {
   const auto count = slot_count(page);
   if (slot >= count) throw std::runtime_error("slot number out of range");
@@ -347,6 +374,7 @@ std::pair<std::uint16_t, std::uint16_t> slot_at(const pb_page &page, std::uint16
 }  // namespace
 
 struct Engine::Impl {
+  // Opens the database and restores its table metadata for engine operations.
   explicit Impl(std::filesystem::path path) : database_path(std::move(path)) {
     const auto parent = database_path.parent_path();
     if (!parent.empty()) std::filesystem::create_directories(parent);
@@ -366,6 +394,7 @@ struct Engine::Impl {
     }
   }
 
+  // Releases the database resources, attempting a normal close when needed.
   ~Impl() {
     if (disk != nullptr) {
       try {
@@ -387,6 +416,7 @@ struct Engine::Impl {
   std::vector<Table> tables;
   bool closed{};
 
+  // Persists metadata and pending page changes before closing the database.
   void close() {
     if (closed) return;
     save_catalog();
@@ -399,10 +429,12 @@ struct Engine::Impl {
     closed = true;
   }
 
+  // Prevents operations from using a database that has already been closed.
   void check_open() const {
     if (closed || disk == nullptr) throw std::runtime_error("database is closed");
   }
 
+  // Finds a table by name or reports that it is not present.
   Table &get_table(const std::string &name) {
     const auto it = std::find_if(tables.begin(), tables.end(), [&](const Table &table) {
       return table.name == name;
@@ -411,6 +443,7 @@ struct Engine::Impl {
     return *it;
   }
 
+  // Restores table, column, and index definitions from the catalog file.
   void load_catalog() {
     auto catalog_path = database_path;
     catalog_path += ".catalog";
@@ -451,6 +484,7 @@ struct Engine::Impl {
     }
   }
 
+  // Persists the current table definitions for the next database session.
   void save_catalog() {
     auto catalog_path = database_path;
     catalog_path += ".catalog";
@@ -482,6 +516,7 @@ struct Engine::Impl {
     }
   }
 
+  // Reserves a new database page for table or index data.
   std::int32_t allocate_page() {
     char error[256]{};
     std::int32_t id{};
@@ -489,14 +524,17 @@ struct Engine::Impl {
     return id;
   }
 
+  // Loads a page through the buffer pool.
   pb_page read_page(std::int32_t id) const {
     return buffer_pool->read_page(id);
   }
 
+  // Sends a changed page through the buffer pool for storage.
   void write_page(const pb_page &page) const {
     buffer_pool->write_page(page);
   }
 
+  // Adds an encoded row to a table and returns its record location.
   RecordId insert_heap(Table &table, const std::vector<std::uint8_t> &bytes) {
     if (bytes.empty() || bytes.size() > PB_PAGE_SIZE - 8u - 4u)
       throw std::runtime_error("tuple is empty or too large");
@@ -527,6 +565,7 @@ struct Engine::Impl {
     return RecordId{page.page_id, n};
   }
 
+  // Adds a row while maintaining the table's indexes and catalog metadata.
   RecordId insert(Table &table, const Row &row) {
     const auto bytes = encode_row(table, row);
     for (const auto &index : table.indexes) {
@@ -545,6 +584,7 @@ struct Engine::Impl {
     return rid;
   }
 
+  // Marks a record as removed so it is ignored by later table scans.
   void mark_deleted(RecordId rid) {
     auto page = read_page(rid.page_id);
     const auto [offset, length] = slot_at(page, rid.slot_num);
@@ -554,6 +594,7 @@ struct Engine::Impl {
     write_page(page);
   }
 
+  // Checks whether a row satisfies a supported data-change predicate.
   bool row_matches(const Table &table, const Row &row,
                    const std::string &condition) const {
     static const std::regex where_re(
@@ -578,6 +619,7 @@ struct Engine::Impl {
     return cmp >= 0;
   }
 
+  // Retrieves and validates one row using its record identifier.
   Row get_record(const Table &table, RecordId rid) const {
     const auto page = read_page(rid.page_id);
     const auto [offset, length] = slot_at(page, rid.slot_num);
@@ -587,12 +629,14 @@ struct Engine::Impl {
     return decode_row(table, page.data + offset, length);
   }
 
+  // Returns the live rows belonging to a table.
   std::vector<Row> scan(const Table &table) const {
     std::vector<Row> rows;
     for (auto &item : scan_records(table)) rows.push_back(std::move(item.second));
     return rows;
   }
 
+  // Reads live rows together with their locations for updates and index work.
   std::vector<std::pair<RecordId, Row>> scan_records(const Table &table) const {
     std::vector<std::pair<RecordId, Row>> rows;
     auto id = table.first_page;
@@ -618,6 +662,7 @@ struct Engine::Impl {
     return rows;
   }
 
+  // Parses and runs one supported SQL statement, returning rows or change counts.
   ExecutionResult execute(const std::string &sql) {
     check_open();
     auto statement = trim(sql);
@@ -1196,12 +1241,14 @@ struct Engine::Impl {
     return result;
   }
 
+  // Finds a column's position within a table definition.
   static std::size_t column_index(const Table &table, const std::string &name) {
     for (std::size_t i = 0; i < table.columns.size(); ++i)
       if (table.columns[i].name == name) return i;
     throw std::runtime_error("unknown column: " + name);
   }
 
+  // Resolves qualified or unqualified column names for SELECT processing.
   static std::size_t resolve_column(const std::string &name, const Table &left,
                                     const Table *right, const std::string &left_name) {
     const auto dot = name.find('.');
@@ -1222,16 +1269,26 @@ struct Engine::Impl {
   }
 };
 
+// Creates an engine connected to the specified database.
 Engine::Engine(std::filesystem::path database_path) : impl_(new Impl(std::move(database_path))) {}
+
+// Releases the engine's database resources.
 Engine::~Engine() { delete impl_; }
+
+// Returns only the rows for callers that do not need query metadata.
 std::vector<Row> Engine::execute(const std::string &sql) {
   return execute_statement(sql).rows;
 }
+
+// Executes a statement and returns its full result and status information.
 ExecutionResult Engine::execute_statement(const std::string &sql) {
   return impl_->execute(sql);
 }
+
+// Explicitly closes the database and persists outstanding changes.
 void Engine::close() { impl_->close(); }
 
+// Formats a database value for display in command-line and application output.
 std::string value_to_string(const Value &value) {
   if (const auto *integer = std::get_if<std::int32_t>(&value))
     return std::to_string(*integer);
