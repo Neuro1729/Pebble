@@ -61,8 +61,9 @@ make clean
 make SANITIZE=address test
 ```
 
-There are no benchmarks yet; make bench reports that. Override tools and paths
-without editing the Makefile, for example:
+Studio includes interactive indexed/unindexed insert and point-operation
+comparisons. There is no standalone benchmark suite yet, so `make bench` still
+reports that. Override tools and paths without editing the Makefile, for example:
 
 ```
 make CC=clang CXX=clang++ BUILD_DIR=build/custom PREFIX=/opt/pebble
@@ -132,6 +133,16 @@ over time. Use the header toggle to switch between light and dark themes; the
 choice is saved in the browser. Telemetry is read from macOS or Linux host
 interfaces; storage model and SSD type are shown when the operating system
 exposes them.
+
+The SQL console and workload results show native command runtime. The LSM
+comparison writes the selected batch to separate indexed and unindexed tables,
+then reports elapsed time and rows per second. Its timing includes native
+client startup and clean shutdown; the panel normalizes results per row to help
+compare batches of different sizes. Add matching rows to both tables, then run
+up to 200 ID-based reads, updates, or deletes. Each point-operation comparison
+uses the same IDs on both tables, alternates which side runs first, and reports
+elapsed time plus the indexed speedup or slowdown. Clear one table or both to
+reset benchmark rows and results.
 
 The studio binds to localhost. Choose another database file with
 `PEBBLE_STUDIO_DB=/path/to/demo.db ./scripts/studio`. The default database is
@@ -228,9 +239,11 @@ LSM index mutations are buffered in memory until the memtable limit is reached
 or the database closes. SSTables and the manifest are replaced through
 temporary files, but there is no WAL or filesystem sync protocol; abrupt
 failure can lose recent index changes or leave heap and index state
-inconsistent. Compaction currently merges all runs for an index and range
-scans materialize run contents in memory. There are no Bloom filters or sparse
-SSTable indexes, and no performance improvement is claimed.
+inconsistent. Size-tiered compaction merges similarly sized runs and keeps
+tombstones while older versions may remain in other runs. Range scans still
+materialize run contents in memory. There are no Bloom filters or sparse
+SSTable indexes. Studio timing is a demo measurement, not a controlled
+benchmark suite.
 
 Sort and grouping are in-memory operations; there is no configurable sort
 budget, spill-run format, or temporary-run lifecycle. The query path returns
@@ -241,5 +254,6 @@ client.
 Legacy Python databases have no persisted catalog to discover. Native SQL
 requires its own versioned `.catalog` sidecar, and there is no legacy import or
 migration command. The Python and native runtimes should not concurrently write
-the same files. No performance gain is claimed because there is no benchmark.
+the same files. Studio's comparisons are demo measurements, not a controlled
+benchmark suite, and do not establish general performance gains.
 Linux, cross-compilation, and the Python pytest suite remain unverified.

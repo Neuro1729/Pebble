@@ -4,6 +4,7 @@
 #include <chrono>
 #include <cstdint>
 #include <filesystem>
+#include <fstream>
 #include <limits>
 #include <map>
 #include <optional>
@@ -157,6 +158,83 @@ void test_compaction_preserves_latest_values_and_deletes() {
   }
 }
 
+void test_size_tiered_compaction_keeps_tombstones_for_older_runs() {
+  TemporaryDirectory directory;
+  const auto index_path = directory.path() / "tiered-tombstones";
+  {
+    pebble::LSMTree tree(index_path, 4);
+    for (std::int32_t key = 1; key <= 4; ++key)
+      tree.insert(key, {key, 1});
+    tree.erase(1);
+    tree.flush();
+    tree.insert(5, {5, 1});
+    tree.flush();
+    tree.insert(6, {6, 1});
+    tree.flush();
+    tree.insert(7, {7, 1});
+    tree.flush();
+
+    assert(!tree.search(1).has_value());
+    const auto entries = tree.scan();
+    assert(entries.size() == 6);
+    assert(entries.front().first == 2 && entries.back().first == 7);
+  }
+  {
+    pebble::LSMTree reopened(index_path, 4, false);
+    assert(!reopened.search(1).has_value());
+    const auto entries = reopened.scan();
+    assert(entries.size() == 6);
+    assert(entries.front().first == 2 && entries.back().first == 7);
+  }
+}
+
+void test_legacy_manifest_is_upgraded_on_open() {
+  TemporaryDirectory directory;
+  const auto index_path = directory.path() / "legacy-manifest";
+  {
+    pebble::LSMTree tree(index_path, 2);
+    tree.insert(10, {1, 1});
+    tree.insert(20, {1, 2});
+    tree.flush();
+  }
+
+  const auto manifest_path = index_path / "MANIFEST";
+  std::string magic;
+  std::uint32_t version{};
+  std::uint64_t next_sequence{};
+  std::uint64_t next_file_id{};
+  std::size_t count{};
+  std::vector<std::uint64_t> run_ids;
+  {
+    std::ifstream in(manifest_path);
+    assert(in >> magic >> version >> next_sequence >> next_file_id >> count);
+    assert(magic == "PEBBLE_LSM" && version == 2);
+    for (std::size_t i = 0; i < count; ++i) {
+      std::uint64_t id{}, max_sequence{};
+      assert(in >> id >> max_sequence);
+      run_ids.push_back(id);
+    }
+  }
+  {
+    std::ofstream out(manifest_path, std::ios::trunc);
+    assert(out.good());
+    out << "PEBBLE_LSM 1 " << next_sequence << ' ' << next_file_id << ' '
+        << count << '\n';
+    for (const auto id : run_ids) out << id << '\n';
+  }
+
+  {
+    pebble::LSMTree reopened(index_path, 2, false);
+    assert(reopened.search(10).has_value());
+    assert(reopened.search(20).has_value());
+  }
+  {
+    std::ifstream in(manifest_path);
+    assert(in >> magic >> version);
+    assert(magic == "PEBBLE_LSM" && version == 2);
+  }
+}
+
 void test_randomized_operations_against_ordered_map() {
   TemporaryDirectory directory;
   const auto index_path = directory.path() / "random";
@@ -236,6 +314,8 @@ int main() {
   test_signed_order_ranges_and_reopen();
   test_tombstone_reinsert_and_duplicate_rules();
   test_compaction_preserves_latest_values_and_deletes();
+  test_size_tiered_compaction_keeps_tombstones_for_older_runs();
+  test_legacy_manifest_is_upgraded_on_open();
   test_randomized_operations_against_ordered_map();
   test_existing_directory_requires_manifest_when_opening();
   return 0;

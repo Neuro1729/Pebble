@@ -1,5 +1,5 @@
-// Implements the B+ tree index used to find records by integer key. It
-// handles index pages, key updates, page splits, and range scans.
+// Implements the LSM index: a sorted memtable, immutable sorted runs,
+// tombstones, point and range lookup, and periodic compaction.
 
 #include "pebble/index.hpp"
 
@@ -8,6 +8,7 @@
 #include <fstream>
 #include <limits>
 #include <map>
+#include <numeric>
 #include <stdexcept>
 #include <string>
 #include <system_error>
@@ -15,12 +16,14 @@
 namespace pebble {
 namespace {
 
-constexpr std::array<char, 8> kManifestMagic{'P', 'B', 'L', 'S', 'M', '0', '1', '\0'};
 constexpr std::array<char, 8> kTableMagic{'P', 'B', 'S', 'S', 'T', '0', '1', '\0'};
-constexpr std::uint32_t kFormatVersion = 1;
+constexpr std::uint32_t kLegacyManifestVersion = 1;
+constexpr std::uint32_t kManifestVersion = 2;
+constexpr std::uint32_t kTableFormatVersion = 1;
 constexpr std::uint64_t kTableHeaderSize = 20;
 constexpr std::uint64_t kRecordSize = 19;
 constexpr std::size_t kCompactionRunCount = 4;
+constexpr std::uint64_t kCompactionSizeRatio = 2;
 
 struct Entry {
   std::int32_t key{};
@@ -31,7 +34,10 @@ struct Entry {
 struct Run {
   std::uint64_t id{};
   std::uint64_t count{};
+  std::uint64_t max_sequence{};
   std::filesystem::path path;
+  std::int32_t first_key{};
+  std::int32_t last_key{};
 };
 
 void put_u32(char *out, std::uint32_t value) {
@@ -157,20 +163,27 @@ struct LSMTree::Impl {
     std::uint32_t version{};
     std::size_t count{};
     if (!(in >> magic >> version >> next_sequence >> next_file_id >> count) ||
-        magic != "PEBBLE_LSM" || version != kFormatVersion ||
+        magic != "PEBBLE_LSM" ||
+        (version != kLegacyManifestVersion && version != kManifestVersion) ||
         next_sequence == 0 || next_file_id == 0)
       throw io_error("unsupported or corrupt LSM manifest", path);
 
-    std::vector<std::uint64_t> ids;
-    ids.reserve(count);
+    std::vector<std::pair<std::uint64_t, std::uint64_t>> manifest_runs;
+    manifest_runs.reserve(count);
     std::uint64_t greatest_id = 0;
     std::uint64_t greatest_sequence = 0;
     for (std::size_t i = 0; i < count; ++i) {
       std::uint64_t id{};
+      std::uint64_t max_sequence{};
       if (!(in >> id) || id == 0 ||
-          std::find(ids.begin(), ids.end(), id) != ids.end())
+          std::any_of(manifest_runs.begin(), manifest_runs.end(),
+                      [&](const auto &entry) { return entry.first == id; }))
         throw io_error("corrupt LSM manifest run list", path);
-      ids.push_back(id);
+      if (version == kManifestVersion &&
+          (!(in >> max_sequence) || max_sequence == 0 ||
+           max_sequence >= next_sequence))
+        throw io_error("corrupt LSM manifest run sequence", path);
+      manifest_runs.emplace_back(id, max_sequence);
       greatest_id = std::max(greatest_id, id);
     }
     if (greatest_id >= next_file_id)
@@ -178,14 +191,21 @@ struct LSMTree::Impl {
     std::string trailing;
     if (in >> trailing) throw io_error("trailing LSM manifest data", path);
 
-    for (const auto id : ids) {
+    for (const auto &[id, manifest_max_sequence] : manifest_runs) {
       auto run = load_run(id);
-      for (const auto &entry : read_all(run))
-        greatest_sequence = std::max(greatest_sequence, entry.sequence);
+      if (version == kLegacyManifestVersion) {
+        for (const auto &entry : read_all(run))
+          run.max_sequence = std::max(run.max_sequence, entry.sequence);
+      } else {
+        run.max_sequence = manifest_max_sequence;
+      }
+      greatest_sequence = std::max(greatest_sequence, run.max_sequence);
       runs.push_back(std::move(run));
     }
     if (greatest_sequence >= next_sequence)
       throw io_error("invalid LSM sequence number", path);
+    if (version == kLegacyManifestVersion)
+      write_manifest(next_sequence, next_file_id, runs);
   }
 
   Run load_run(std::uint64_t id) const {
@@ -196,7 +216,7 @@ struct LSMTree::Impl {
     in.read(header.data(), static_cast<std::streamsize>(header.size()));
     if (!in || !std::equal(kTableMagic.begin(), kTableMagic.end(),
                            header.begin()) ||
-        get_u32(header.data() + 8) != kFormatVersion)
+        get_u32(header.data() + 8) != kTableFormatVersion)
       throw io_error("corrupt LSM table header", path);
     const auto count = get_u64(header.data() + 12);
     std::error_code error;
@@ -206,7 +226,24 @@ struct LSMTree::Impl {
                              kRecordSize ||
         size != kTableHeaderSize + count * kRecordSize)
       throw io_error("invalid LSM table size", path);
-    return {id, count, path};
+    std::int32_t first_key = 0;
+    std::int32_t last_key = 0;
+    if (count != 0) {
+      std::array<char, kRecordSize> bytes{};
+      in.seekg(static_cast<std::streamoff>(kTableHeaderSize));
+      in.read(bytes.data(), static_cast<std::streamsize>(bytes.size()));
+      if (!in) throw io_error("cannot read LSM table bounds", path);
+      first_key = decode_entry(bytes, path).key;
+      in.clear();
+      in.seekg(static_cast<std::streamoff>(
+          kTableHeaderSize + (count - 1) * kRecordSize));
+      in.read(bytes.data(), static_cast<std::streamsize>(bytes.size()));
+      if (!in) throw io_error("cannot read LSM table bounds", path);
+      last_key = decode_entry(bytes, path).key;
+      if (first_key > last_key)
+        throw io_error("invalid LSM table key bounds", path);
+    }
+    return {id, count, 0, path, first_key, last_key};
   }
 
   std::vector<Entry> read_all(const Run &run) const {
@@ -239,9 +276,10 @@ struct LSMTree::Impl {
     {
       std::ofstream out(temporary, std::ios::trunc);
       if (!out) throw io_error("cannot write LSM manifest", temporary);
-      out << "PEBBLE_LSM " << kFormatVersion << ' ' << sequence << ' '
+      out << "PEBBLE_LSM " << kManifestVersion << ' ' << sequence << ' '
           << file_id << ' ' << manifest_runs.size() << '\n';
-      for (const auto &run : manifest_runs) out << run.id << '\n';
+      for (const auto &run : manifest_runs)
+        out << run.id << ' ' << run.max_sequence << '\n';
       out.flush();
       if (!out) throw io_error("writing LSM manifest failed", temporary);
     }
@@ -257,7 +295,7 @@ struct LSMTree::Impl {
       if (!out) throw io_error("cannot write LSM table", temporary);
       std::array<char, kTableHeaderSize> header{};
       std::copy(kTableMagic.begin(), kTableMagic.end(), header.begin());
-      put_u32(header.data() + 8, kFormatVersion);
+      put_u32(header.data() + 8, kTableFormatVersion);
       put_u64(header.data() + 12, entries.size());
       out.write(header.data(), static_cast<std::streamsize>(header.size()));
       for (const auto &entry : entries) {
@@ -268,7 +306,12 @@ struct LSMTree::Impl {
       if (!out) throw io_error("writing LSM table failed", temporary);
     }
     replace_file(temporary, path);
-    return {id, entries.size(), path};
+    std::uint64_t max_sequence = 0;
+    for (const auto &entry : entries)
+      max_sequence = std::max(max_sequence, entry.sequence);
+    return {id, entries.size(), max_sequence, path,
+            entries.empty() ? 0 : entries.front().key,
+            entries.empty() ? 0 : entries.back().key};
   }
 
   void erase_runs(const std::vector<Run> &old_runs) const {
@@ -282,6 +325,8 @@ struct LSMTree::Impl {
   }
 
   std::optional<Entry> find_in_run(const Run &run, std::int32_t key) const {
+    if (run.count == 0 || key < run.first_key || key > run.last_key)
+      return std::nullopt;
     std::ifstream in(run.path, std::ios::binary);
     if (!in) throw io_error("cannot read LSM table", run.path);
     std::uint64_t low = 0;
@@ -324,8 +369,30 @@ struct LSMTree::Impl {
 
   void compact() {
     if (runs.size() < kCompactionRunCount) return;
+
+    // Merge similarly sized runs. Merging every run after each few flushes
+    // rewrites the entire index repeatedly for append-heavy workloads.
+    std::vector<std::size_t> order(runs.size());
+    std::iota(order.begin(), order.end(), 0);
+    std::sort(order.begin(), order.end(), [&](std::size_t left,
+                                               std::size_t right) {
+      if (runs[left].count != runs[right].count)
+        return runs[left].count < runs[right].count;
+      return runs[left].id < runs[right].id;
+    });
+    std::vector<Run> selected;
+    selected.reserve(kCompactionRunCount);
+    for (std::size_t i = 0; i < kCompactionRunCount; ++i)
+      selected.push_back(runs[order[i]]);
+    const auto smallest_count = selected.front().count;
+    const auto largest_count = selected.back().count;
+    if (smallest_count == 0 ||
+        static_cast<long double>(largest_count) >
+            static_cast<long double>(smallest_count) * kCompactionSizeRatio)
+      return;
+
     std::map<std::int32_t, Entry> latest;
-    for (const auto &run : runs) {
+    for (const auto &run : selected) {
       for (const auto &entry : read_all(run)) {
         const auto current = latest.find(entry.key);
         if (current == latest.end() ||
@@ -338,10 +405,18 @@ struct LSMTree::Impl {
     compacted.reserve(latest.size());
     for (auto &[key, entry] : latest) {
       (void)key;
-      if (entry.value) compacted.push_back(std::move(entry));
+      // Keep tombstones because older versions may still be in unselected runs.
+      compacted.push_back(std::move(entry));
     }
 
     std::vector<Run> new_runs;
+    new_runs.reserve(runs.size() - kCompactionRunCount + 1);
+    for (const auto &run : runs) {
+      if (std::none_of(selected.begin(), selected.end(), [&](const Run &item) {
+            return item.id == run.id;
+          }))
+        new_runs.push_back(run);
+    }
     auto new_next_file_id = next_file_id;
     if (!compacted.empty()) {
       if (new_next_file_id == std::numeric_limits<std::uint64_t>::max())
@@ -349,10 +424,9 @@ struct LSMTree::Impl {
       new_runs.push_back(write_run(new_next_file_id++, compacted));
     }
     write_manifest(next_sequence, new_next_file_id, new_runs);
-    const auto old_runs = runs;
     runs = std::move(new_runs);
     next_file_id = new_next_file_id;
-    erase_runs(old_runs);
+    erase_runs(selected);
   }
 
   void flush() {
@@ -399,9 +473,13 @@ std::optional<RecordId> LSMTree::search(std::int32_t key) const {
 }
 
 void LSMTree::insert(std::int32_t key, RecordId value) {
-  if (value.page_id < 0) throw std::invalid_argument("invalid RID page id");
   if (search(key))
     throw std::runtime_error("duplicate index key: " + std::to_string(key));
+  insert_known_unique(key, value);
+}
+
+void LSMTree::insert_known_unique(std::int32_t key, RecordId value) {
+  if (value.page_id < 0) throw std::invalid_argument("invalid RID page id");
   const auto sequence = impl_->take_sequence();
   impl_->memtable[key] = Entry{key, sequence, value};
   if (impl_->memtable.size() >= impl_->memtable_limit) impl_->flush();

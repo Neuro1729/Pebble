@@ -490,7 +490,7 @@ struct Engine::Impl {
           throw std::runtime_error("corrupt catalog index record");
         if (version == 3)
           index.tree =
-              std::make_unique<LSMTree>(index_directory(index.name), 128, false);
+              std::make_unique<LSMTree>(index_directory(index.name), 4096, false);
         table.indexes.push_back(std::move(index));
       }
       tables.push_back(std::move(table));
@@ -605,9 +605,8 @@ struct Engine::Impl {
     const auto rid = insert_heap(table, bytes);
     for (auto &index : table.indexes) {
       const auto key = std::get<std::int32_t>(row[index.column_index]);
-      index.tree->insert(key, rid);
+      index.tree->insert_known_unique(key, rid);
     }
-    save_catalog();
     return rid;
   }
 
@@ -644,6 +643,45 @@ struct Engine::Impl {
     if (op == "<=") return cmp <= 0;
     if (op == ">") return cmp > 0;
     return cmp >= 0;
+  }
+
+  // Uses an LSM point lookup for equality on an indexed INTEGER column.
+  std::vector<std::pair<RecordId, Row>> matching_records(
+      const Table &table, const std::optional<std::string> &condition) const {
+    if (!condition) return scan_records(table);
+
+    static const std::regex equality_re(
+        R"(^\s*([\w.]+)\s*=\s*(.+?)\s*$)");
+    std::smatch match;
+    if (std::regex_match(*condition, match, equality_re)) {
+      const auto column_name = match[1].str();
+      if (column_name.find('.') == std::string::npos) {
+        const auto column = column_index(table, column_name);
+        const auto value = parse_value(match[2].str());
+        if (table.columns[column].type == Type::Integer &&
+            std::holds_alternative<std::int32_t>(value)) {
+          const auto indexed = std::find_if(
+              table.indexes.begin(), table.indexes.end(),
+              [&](const IndexInfo &index) {
+                return index.column_index == column;
+              });
+          if (indexed != table.indexes.end()) {
+            const auto key = std::get<std::int32_t>(value);
+            const auto rid = indexed->tree->search(key);
+            if (!rid) return {};
+            auto row = get_record(table, *rid);
+            if (!row_matches(table, row, *condition)) return {};
+            return {{*rid, std::move(row)}};
+          }
+        }
+      }
+    }
+
+    std::vector<std::pair<RecordId, Row>> matches;
+    for (auto &record : scan_records(table))
+      if (row_matches(table, record.second, *condition))
+        matches.push_back(std::move(record));
+    return matches;
   }
 
   // Retrieves and validates one row using its record identifier.
@@ -829,20 +867,21 @@ struct Engine::Impl {
         std::regex::icase);
     if (std::regex_match(statement, match, delete_re)) {
       auto &table = get_table(match[1].str());
-      const auto rows = scan_records(table);
-      std::vector<RecordId> victims;
-      for (const auto &[rid, row] : rows)
-        if (!match[2].matched || row_matches(table, row, match[2].str()))
-          victims.push_back(rid);
-      for (const auto rid : victims) {
-        const auto row = get_record(table, rid);
+      const auto victims = matching_records(
+          table, match[2].matched
+                     ? std::optional<std::string>(match[2].str())
+                     : std::nullopt);
+      for (const auto &[rid, row] : victims) {
         for (auto &index : table.indexes) {
           const auto key = std::get<std::int32_t>(row[index.column_index]);
           if (!index.tree->erase(key))
             throw std::runtime_error("missing index entry during DELETE");
         }
       }
-      for (const auto rid : victims) mark_deleted(rid);
+      for (const auto &[rid, row] : victims) {
+        (void)row;
+        mark_deleted(rid);
+      }
       return ExecutionResult{{}, {}, victims.size(), false, {}};
     }
 
@@ -881,8 +920,11 @@ struct Engine::Impl {
         bool moved{};
       };
       std::vector<Change> changes;
-      for (const auto &[rid, row] : scan_records(table)) {
-        if (match[3].matched && !row_matches(table, row, match[3].str())) continue;
+      const auto candidates = matching_records(
+          table, match[3].matched
+                     ? std::optional<std::string>(match[3].str())
+                     : std::nullopt);
+      for (const auto &[rid, row] : candidates) {
         Row replacement = row;
         for (const auto &[column, value] : assignments) replacement[column] = value;
         auto bytes = encode_row(table, replacement);
@@ -894,21 +936,34 @@ struct Engine::Impl {
                            slot.second, rid, false});
       }
 
-      // Validate every unique index against the final table state before
-      // changing rows or index pages. This also permits swaps of unique keys.
+      // Check changed index keys before mutating rows. Point lookups preserve
+      // unique-key swaps without scanning every table row.
       for (const auto &index : table.indexes) {
         std::unordered_set<std::int32_t> keys;
-        for (const auto &[rid, row] : scan_records(table)) {
-          const auto change = std::find_if(changes.begin(), changes.end(),
-              [&](const Change &item) {
-                return item.old_rid.page_id == rid.page_id &&
-                       item.old_rid.slot_num == rid.slot_num;
-              });
-          const auto &final_row = change == changes.end() ? row : change->new_row;
-          const auto key = std::get<std::int32_t>(final_row[index.column_index]);
+        for (const auto &change : changes) {
+          const auto old_key =
+              std::get<std::int32_t>(change.old_row[index.column_index]);
+          const auto key =
+              std::get<std::int32_t>(change.new_row[index.column_index]);
+          if (old_key == key) continue;
           if (!keys.insert(key).second)
             throw std::runtime_error("duplicate index key after UPDATE: " +
                                      std::to_string(key));
+          const auto occupant = index.tree->search(key);
+          if (occupant) {
+            const auto occupant_change = std::find_if(
+                changes.begin(), changes.end(), [&](const Change &item) {
+                  return item.old_rid.page_id == occupant->page_id &&
+                         item.old_rid.slot_num == occupant->slot_num;
+                });
+            const auto occupant_keeps_key =
+                occupant_change != changes.end() &&
+                std::get<std::int32_t>(
+                    occupant_change->new_row[index.column_index]) == key;
+            if (occupant_change == changes.end() || occupant_keeps_key)
+              throw std::runtime_error("duplicate index key after UPDATE: " +
+                                       std::to_string(key));
+          }
         }
       }
 
@@ -938,15 +993,24 @@ struct Engine::Impl {
       // unique-key swaps do not conflict with their old values.
       for (const auto &change : changes) {
         for (auto &index : table.indexes) {
-          const auto key = std::get<std::int32_t>(change.old_row[index.column_index]);
+          const auto old_key =
+              std::get<std::int32_t>(change.old_row[index.column_index]);
+          const auto new_key =
+              std::get<std::int32_t>(change.new_row[index.column_index]);
+          if (old_key == new_key && !change.moved) continue;
+          const auto key = old_key;
           if (!index.tree->erase(key))
             throw std::runtime_error("missing index entry during UPDATE");
         }
       }
       for (const auto &change : changes) {
         for (auto &index : table.indexes) {
-          const auto key = std::get<std::int32_t>(change.new_row[index.column_index]);
-          index.tree->insert(key, change.new_rid);
+          const auto old_key =
+              std::get<std::int32_t>(change.old_row[index.column_index]);
+          const auto key =
+              std::get<std::int32_t>(change.new_row[index.column_index]);
+          if (old_key == key && !change.moved) continue;
+          index.tree->insert_known_unique(key, change.new_rid);
         }
       }
       save_catalog();
@@ -990,6 +1054,7 @@ struct Engine::Impl {
         ++inserted;
       }
       if (inserted == 0) throw std::runtime_error("INSERT VALUES needs at least one row");
+      save_catalog();
       return ExecutionResult{{}, {}, inserted, false, {}};
     }
 

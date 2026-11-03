@@ -19,11 +19,15 @@ the prompt. For automation, `./scripts/dbms --file setup.sql ./people.db` and
 `--execute` remain available. Batch query timing is opt-in with `--timing` and
 is written to stderr.
 
-For a browser workbench with configurable insert/update/delete workloads and
-live machine telemetry, run
+For a browser workbench with configurable workloads, indexed/unindexed insert
+and point read/update/delete comparisons, command runtimes, and live machine
+telemetry, run
 `make debug && ./scripts/studio` and open the local URL it prints. The studio
 uses a separate `data/presenter.db` database by default; set
 `PEBBLE_STUDIO_DB` to use a different database file.
+
+See [SQL_COMMANDS.md](SQL_COMMANDS.md) for the complete native SQL and DBMS
+client command reference.
 
 The native runtime still lacks transactions, undo, WAL, crash recovery,
 disk-backed sorting, the modular Volcano executor API, and automatic discovery

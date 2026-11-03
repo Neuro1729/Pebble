@@ -259,6 +259,26 @@ int main() {
     assert(db.execute("SELECT id FROM dml_rows WHERE id = 3").empty());
     assert(db.execute("SELECT id FROM dml_rows WHERE id = 4").empty());
     assert(db.execute("SELECT id FROM dml_rows").size() == 1);
+
+    db.execute("CREATE TABLE point_dml (id INTEGER, score INTEGER)");
+    std::string point_dml_insert = "INSERT INTO point_dml VALUES ";
+    for (int i = 0; i < 500; ++i) {
+      if (i != 0) point_dml_insert += ", ";
+      point_dml_insert += "(" + std::to_string(i) + ", 0)";
+    }
+    db.execute(point_dml_insert);
+    db.execute("CREATE INDEX point_dml_id ON point_dml (id)");
+    const auto point_update = db.execute_statement(
+        "UPDATE point_dml SET score = 9001 WHERE id = 499");
+    assert(point_update.affected_rows == 1);
+    const auto updated_point =
+        db.execute("SELECT score FROM point_dml WHERE id = 499");
+    assert(updated_point.size() == 1 &&
+           pebble::value_to_string(updated_point[0][0]) == "9001");
+    const auto point_delete =
+        db.execute_statement("DELETE FROM point_dml WHERE id = 498");
+    assert(point_delete.affected_rows == 1);
+    assert(db.execute("SELECT id FROM point_dml WHERE id = 498").empty());
     db.close();
   }
 

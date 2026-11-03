@@ -19,7 +19,7 @@ struct RecordId {
 class LSMTree {
  public:
   explicit LSMTree(std::filesystem::path directory,
-                   std::size_t memtable_limit = 128,
+                   std::size_t memtable_limit = 4096,
                    bool create_if_missing = true);
   ~LSMTree();
 
@@ -30,6 +30,8 @@ class LSMTree {
 
   std::optional<RecordId> search(std::int32_t key) const;
   void insert(std::int32_t key, RecordId value);
+  // Inserts a key already checked by the owning table, avoiding a second lookup.
+  void insert_known_unique(std::int32_t key, RecordId value);
   bool erase(std::int32_t key);
   std::vector<std::pair<std::int32_t, RecordId>> scan(
       std::optional<std::int32_t> low = std::nullopt,

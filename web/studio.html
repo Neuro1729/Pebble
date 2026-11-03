@@ -66,6 +66,38 @@
       .action small { display: block; margin-top: 4px; color: var(--muted); font-size: 10px; }
       .hint { display: flex; align-items: center; gap: 7px; margin: 13px 0 0; color: #8b9690; font-size: 10px; }
       .hint svg { flex: none; }
+      .benchmark { padding: 21px 22px 22px; }
+      .benchmark-heading-actions { display: flex; align-items: center; gap: 8px; }
+      .benchmark-clear { flex: none; padding: 6px 9px; border: 1px solid var(--line); border-radius: 7px; color: #6d7973; background: transparent; font-size: 9px; font-weight: 620; cursor: pointer; transition: background .15s, border-color .15s; }
+      .benchmark-clear:hover:not(:disabled) { border-color: #c8d5cc; background: #f6f9f6; }
+      .benchmark-clear:disabled { cursor: wait; opacity: .5; }
+      .benchmark-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; margin-top: 17px; }
+      .benchmark .action { min-height: 72px; }
+      .benchmark .action.unindexed .action-icon { color: #5474a8; background: #eaf0fb; }
+      .benchmark-counts { display: flex; flex-wrap: wrap; gap: 8px 18px; margin-top: 13px; color: var(--muted); font-size: 10px; }
+      .benchmark-counts strong { color: var(--ink); font: 11px var(--mono); font-variant-numeric: tabular-nums; }
+      .benchmark-results { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; margin-top: 16px; }
+      .benchmark-result { min-width: 0; padding: 11px 12px; border: 1px solid var(--line); border-radius: 9px; background: #fafbf9; }
+      .benchmark-result-heading, .benchmark-result-detail { display: flex; justify-content: space-between; align-items: baseline; gap: 8px; }
+      .benchmark-result-heading { color: #66736d; font-size: 10px; }
+      .benchmark-result-heading strong { color: var(--ink); font-size: 10px; font-weight: 650; }
+      .benchmark-result > strong { display: block; margin-top: 6px; color: var(--ink); font-size: 10px; font-weight: 650; }
+      .benchmark-result-detail { margin-top: 8px; color: var(--muted); font: 10px var(--mono); font-variant-numeric: tabular-nums; }
+      .benchmark-note { min-height: 15px; margin: 11px 1px 0; color: #859189; font-size: 10px; line-height: 1.5; }
+      .operations { padding: 21px 22px 22px; }
+      .operation-count { margin-top: 15px; }
+      .operation-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px; margin-top: 14px; }
+      .operation-grid .action { min-height: 68px; }
+      .operation-grid .action.update .action-icon { color: #aa7529; background: #fbf1df; }
+      .operation-grid .action.delete .action-icon { color: #b4584e; background: #faeae8; }
+      .operation-table-wrap { overflow-x: auto; margin-top: 16px; border: 1px solid var(--line); border-radius: 9px; }
+      .operation-table { width: 100%; min-width: 500px; border-collapse: collapse; font-size: 10px; }
+      .operation-table th, .operation-table td { padding: 10px 12px; border-bottom: 1px solid var(--line); text-align: left; white-space: nowrap; }
+      .operation-table thead th { color: #75817c; background: #f8faf7; font-size: 9px; font-weight: 700; }
+      .operation-table tbody th { color: var(--ink); font-weight: 650; }
+      .operation-table tbody td { color: var(--muted); font: 10px var(--mono); font-variant-numeric: tabular-nums; }
+      .operation-table tbody tr:last-child th, .operation-table tbody tr:last-child td { border-bottom: 0; }
+      .operation-note { min-height: 15px; margin: 11px 1px 0; color: #859189; font-size: 10px; line-height: 1.5; }
       .sql-panel { overflow: hidden; }
       .sql-head { display: flex; justify-content: space-between; align-items: center; gap: 16px; padding: 17px 20px 14px; }
       .sql-label { display: flex; align-items: center; gap: 8px; }
@@ -83,6 +115,7 @@
       .output-wrap.visible { display: block; }
       .output-header { display: flex; align-items: center; justify-content: space-between; padding: 11px 20px; color: #738079; font-size: 10px; font-weight: 650; }
       .output-status { display: flex; align-items: center; gap: 6px; }
+      .output-runtime { margin-left: auto; margin-right: 14px; color: var(--muted); font: 10px var(--mono); font-weight: 500; font-variant-numeric: tabular-nums; }
       .output-status.success { color: var(--green); }
       .output-status.error { color: var(--red); }
       .output-content { max-height: 300px; overflow: auto; padding: 0 20px 17px; color: #53615b; white-space: pre-wrap; overflow-wrap: anywhere; font: 11px/1.65 var(--mono); }
@@ -140,6 +173,19 @@
       body[data-theme="dark"] .action:hover:not(:disabled) { background: #26332b; border-color: #4a7d61; }
       body[data-theme="dark"] .action.update .action-icon { color: #e2b86e; background: #3a3020; }
       body[data-theme="dark"] .action.delete .action-icon { color: #f18e82; background: #3b2826; }
+      body[data-theme="dark"] .benchmark .action.unindexed .action-icon { color: #a8bee9; background: #29364c; }
+      body[data-theme="dark"] .benchmark-result { background: #202a24; }
+      body[data-theme="dark"] .benchmark-result-heading { color: #b3c0b8; }
+      body[data-theme="dark"] .benchmark-clear { color: #a8b5ac; background: transparent; }
+      body[data-theme="dark"] .benchmark-clear:hover:not(:disabled) { border-color: #526057; background: #27322b; }
+      body[data-theme="dark"] .benchmark-note { color: #93a097; }
+      body[data-theme="dark"] .operation-grid .action.update .action-icon { color: #e2b86e; background: #3a3020; }
+      body[data-theme="dark"] .operation-grid .action.delete .action-icon { color: #f18e82; background: #3b2826; }
+      body[data-theme="dark"] .operation-table-wrap { border-color: #354139; }
+      body[data-theme="dark"] .operation-table th, body[data-theme="dark"] .operation-table td { border-color: #354139; }
+      body[data-theme="dark"] .operation-table thead th { color: #a4b0a8; background: #252f29; }
+      body[data-theme="dark"] .operation-table tbody th { color: var(--ink); }
+      body[data-theme="dark"] .operation-note { color: #93a097; }
       body[data-theme="dark"] .hint, body[data-theme="dark"] .keyboard-note { color: #93a097; }
       body[data-theme="dark"] .batch-size { color: #b3c0b8; }
       body[data-theme="dark"] kbd { color: #c1cdc5; background: #27322b; border-color: #3b473f; }
@@ -160,7 +206,9 @@
       body[data-theme="dark"] .toast.error { color: #ffaaa0; border-color: #70413b; }
       @media (max-width: 940px) { .layout { grid-template-columns: minmax(0, 1fr) 310px; gap: 14px; } .topbar { padding: 0 4vw; } main { width: 92vw; } }
       @media (max-width: 760px) { .topbar { height: 58px; } .top-right > span:first-child { display: none; } main { margin-top: 29px; } .intro { align-items: flex-start; flex-direction: column; margin-bottom: 21px; } .db-chip { margin-top: -5px; } .layout { grid-template-columns: 1fr; } .right-column { position: static; } .telemetry { display: grid; grid-template-columns: 1fr 1fr; column-gap: 18px; } .telemetry-heading, .system-meta, .cpu-model, .chart-block, .disk-summary, .footnote { grid-column: 1 / -1; } .telemetry-heading { margin-bottom: 0; } .system-meta { margin: 15px 0 9px; } .cpu-model { padding-bottom: 12px; } .metric { margin-bottom: 12px; } .chart-block { margin-top: 8px; } .top-actions { gap: 7px; } }
-      @media (max-width: 520px) { .topbar { padding: 0 4vw; } .top-right { gap: 8px; } .top-actions { gap: 6px; } .local-tag { padding: 6px 8px; font-size: 9px; } .theme-toggle { padding: 6px 8px; font-size: 9px; } main { width: 92vw; } .workload { padding: 17px 15px; } .action-grid { grid-template-columns: 1fr; gap: 7px; margin-top: 14px; } .action { min-height: 57px; padding: 10px; } .action-icon { width: 31px; height: 31px; } .panel-heading { align-items: center; } .batch-size { flex-wrap: wrap; margin-top: 14px; } .batch-size small { flex-basis: 100%; margin-left: 0; } .sql-head { padding: 15px; } .sql-editor { min-height: 145px; padding: 14px 15px; } .sql-foot { padding: 9px 15px; } .keyboard-note { font-size: 9px; } .keyboard-note .hide-mobile { display: none; } .output-header, .output-content { padding-left: 15px; padding-right: 15px; } .telemetry { display: block; } .system-meta { margin: 15px 0; } .cpu-model { padding-bottom: 13px; } }
+      @media (max-width: 520px) { .benchmark .panel-heading { align-items: flex-start; flex-wrap: wrap; } .benchmark-heading-actions { width: 100%; justify-content: space-between; } }
+      @media (max-width: 520px) { .operations { padding: 17px 15px; } .operation-grid { grid-template-columns: 1fr; gap: 7px; } }
+      @media (max-width: 520px) { .topbar { padding: 0 4vw; } .top-right { gap: 8px; } .top-actions { gap: 6px; } .local-tag { padding: 6px 8px; font-size: 9px; } .theme-toggle { padding: 6px 8px; font-size: 9px; } main { width: 92vw; } .workload, .benchmark { padding: 17px 15px; } .action-grid, .benchmark-grid, .benchmark-results { grid-template-columns: 1fr; gap: 7px; margin-top: 14px; } .action { min-height: 57px; padding: 10px; } .action-icon { width: 31px; height: 31px; } .panel-heading { align-items: center; } .batch-size { flex-wrap: wrap; margin-top: 14px; } .batch-size small { flex-basis: 100%; margin-left: 0; } .sql-head { padding: 15px; } .sql-editor { min-height: 145px; padding: 14px 15px; } .sql-foot { padding: 9px 15px; } .keyboard-note { font-size: 9px; } .keyboard-note .hide-mobile { display: none; } .output-header, .output-content { padding-left: 15px; padding-right: 15px; } .telemetry { display: block; } .system-meta { margin: 15px 0; } .cpu-model { padding-bottom: 13px; } }
       @media (max-width: 360px) { .theme-toggle { width: 30px; height: 30px; justify-content: center; padding: 0; } .theme-toggle span, .local-tag { display: none; } }
     </style>
   </head>
@@ -187,11 +235,41 @@
             <p class="hint"><svg width="13" height="13" viewBox="0 0 24 24" fill="none"><circle cx="12" cy="12" r="9" stroke="currentColor" stroke-width="1.7"/><path d="M12 11v5m0-8h.01" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"/></svg>Each add appends fresh IDs, so you can run it again without deleting existing rows.</p>
           </section>
 
+          <section class="panel benchmark">
+            <div class="panel-heading"><div><h2 class="section-title">LSM index write comparison</h2><p class="section-sub">Add the same batch to isolated tables, one maintained by an LSM index and one with no index.</p></div><div class="benchmark-heading-actions"><span class="local-tag">Uses batch size above</span><button class="benchmark-clear" data-action="clear_benchmarks" type="button">Clear both</button></div></div>
+            <div class="benchmark-grid">
+              <button class="action" data-action="benchmark_indexed"><span class="action-icon"><svg width="17" height="17" viewBox="0 0 24 24" fill="none"><path d="M4 5h16M4 12h16M4 19h16M8 3v4m8 3v4M8 17v4" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"/></svg></span><span><strong>Add with LSM index</strong><small>Insert into lsm_bench_indexed</small></span></button>
+              <button class="action unindexed" data-action="benchmark_unindexed"><span class="action-icon"><svg width="17" height="17" viewBox="0 0 24 24" fill="none"><path d="M4 5h16M4 12h8M4 19h16M8 3v4m8 12v4" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"/></svg></span><span><strong>Add without index</strong><small>Insert into lsm_bench_unindexed</small></span></button>
+            </div>
+            <div class="benchmark-counts"><span><strong id="benchmark-indexed-count">0</strong> rows in indexed table</span><span><strong id="benchmark-unindexed-count">0</strong> rows in unindexed table</span></div>
+            <div class="benchmark-results">
+              <div class="benchmark-result"><div class="benchmark-result-heading"><span>Indexed batch</span><button class="benchmark-clear" data-action="clear_benchmark_indexed" type="button">Clear table</button></div><strong id="benchmark-indexed-label">Not run</strong><div class="benchmark-result-detail"><span id="benchmark-indexed-time">—</span><span id="benchmark-indexed-rate">— rows/s</span></div></div>
+              <div class="benchmark-result"><div class="benchmark-result-heading"><span>Unindexed batch</span><button class="benchmark-clear" data-action="clear_benchmark_unindexed" type="button">Clear table</button></div><strong id="benchmark-unindexed-label">Not run</strong><div class="benchmark-result-detail"><span id="benchmark-unindexed-time">—</span><span id="benchmark-unindexed-rate">— rows/s</span></div></div>
+            </div>
+            <p class="benchmark-note" id="benchmark-note">Run both with the same batch size to compare per-row insert time. Timing includes native client startup, the SQL statement, and clean shutdown.</p>
+          </section>
+
+          <section class="panel operations">
+            <div class="panel-heading"><div><h2 class="section-title">Point operation comparison</h2><p class="section-sub">Run matching reads, updates, or deletes by ID against both benchmark tables.</p></div><span class="local-tag">LSM key lookups</span></div>
+            <div class="batch-size operation-count"><label for="operations-count">Operations per run</label><input id="operations-count" type="number" min="1" max="200" step="1" value="25" aria-label="Number of point operations to compare"><small>1–200 matching IDs</small></div>
+            <div class="operation-grid">
+              <button class="action" data-operation="read" type="button"><span class="action-icon"><svg width="17" height="17" viewBox="0 0 24 24" fill="none"><circle cx="10.8" cy="10.8" r="6.3" stroke="currentColor" stroke-width="1.7"/><path d="m15.5 15.5 4.5 4.5" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"/></svg></span><span><strong>Compare point reads</strong><small>Find rows by indexed ID</small></span></button>
+              <button class="action update" data-operation="update" type="button"><span class="action-icon"><svg width="17" height="17" viewBox="0 0 24 24" fill="none"><path d="m14 5 5 5M4 20l4.3-.9L19 8.4 15.6 5 5 15.6 4 20Z" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/></svg></span><span><strong>Compare point updates</strong><small>Set score by ID</small></span></button>
+              <button class="action delete" data-operation="delete" type="button"><span class="action-icon"><svg width="16" height="16" viewBox="0 0 24 24" fill="none"><path d="M4.5 7h15M9 7V4.5h6V7m3.5 0-.8 12H6.3l-.8-12M10 10v6m4-6v6" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"/></svg></span><span><strong>Compare point deletes</strong><small>Delete matching tail IDs</small></span></button>
+            </div>
+            <div class="operation-table-wrap"><table class="operation-table"><thead><tr><th>Operation</th><th>With LSM index</th><th>Without index</th><th>Difference</th></tr></thead><tbody>
+              <tr><th scope="row">Point reads</th><td id="operation-read-indexed">Not run</td><td id="operation-read-unindexed">Not run</td><td id="operation-read-delta">—</td></tr>
+              <tr><th scope="row">Point updates</th><td id="operation-update-indexed">Not run</td><td id="operation-update-unindexed">Not run</td><td id="operation-update-delta">—</td></tr>
+              <tr><th scope="row">Point deletes</th><td id="operation-delete-indexed">Not run</td><td id="operation-delete-unindexed">Not run</td><td id="operation-delete-delta">—</td></tr>
+            </tbody></table></div>
+            <p class="operation-note" id="operation-note">For a fair comparison, add the same row batch to both tables above. Reads and DML target the same IDs on both sides.</p>
+          </section>
+
           <section class="panel sql-panel">
             <div class="sql-head"><div><div class="sql-label"><svg width="15" height="15" viewBox="0 0 24 24" fill="none"><path d="m8 5-7 7 7 7M16 5l7 7-7 7m-3-16-2 18" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/></svg><h2 class="section-title">SQL console</h2></div><p class="section-sub">Send commands to the native Pebble engine.</p></div><span class="local-tag">SQL</span></div>
             <textarea class="sql-editor" id="sql" spellcheck="false" aria-label="SQL command" placeholder="SELECT COUNT(*) FROM demo_entries;\n\nTry any supported Pebble SQL statement…">SELECT id, label, score FROM demo_entries ORDER BY id LIMIT 10;</textarea>
             <div class="sql-foot"><span class="keyboard-note"><kbd>⌘</kbd><kbd>↵</kbd><span class="hide-mobile"> &nbsp;to run</span></span><button class="run-button" id="run-sql"><svg width="13" height="13" viewBox="0 0 24 24" fill="none"><path d="m8 5 11 7-11 7V5Z" fill="currentColor"/></svg>Run SQL</button></div>
-            <div class="output-wrap" id="output-wrap"><div class="output-header"><span>RESULT</span><span class="output-status success" id="output-status"><i class="dot"></i> Ready</span></div><pre class="output-content" id="output"></pre></div>
+            <div class="output-wrap" id="output-wrap"><div class="output-header"><span>RESULT</span><span class="output-runtime" id="output-runtime"></span><span class="output-status success" id="output-status"><i class="dot"></i> Ready</span></div><pre class="output-content" id="output"></pre></div>
           </section>
         </div>
 
@@ -215,7 +293,17 @@
       const histories = { cpu: [], memory: [] };
       const historyLength = 60;
       let busy = false;
+      let benchmarkRowsReady = false;
       let toastTimer;
+      const benchmarkRuns = { indexed: null, unindexed: null };
+      const operationResults = { read: null, update: null, delete: null };
+      document.querySelectorAll('[data-operation]').forEach((button) => button.disabled = true);
+
+      function formatDuration(milliseconds) {
+        const value = Number(milliseconds);
+        if (!Number.isFinite(value) || value < 0) return '—';
+        return value < 1000 ? `${value.toFixed(2)} ms` : `${(value / 1000).toFixed(2)} s`;
+      }
 
       function formatBytes(value) {
         if (value == null || Number.isNaN(Number(value))) return '—';
@@ -313,6 +401,7 @@
           $('#db-path').textContent = status.database.split('/').slice(-2).join('/');
           $('#db-path').title = status.database;
           $('#row-count').textContent = Number(status.rows).toLocaleString();
+          updateBenchmarkCounts(status);
           $('.action.add').disabled = busy;
           $('.action.update').disabled = Number(status.rows) === 0 || busy;
           $('.action.delete').disabled = Number(status.rows) === 0 || busy;
@@ -322,12 +411,103 @@
         }
       }
 
+      function updateBenchmarkCounts(status) {
+        if (status.indexed_benchmark_rows != null) $('#benchmark-indexed-count').textContent = Number(status.indexed_benchmark_rows).toLocaleString();
+        if (status.unindexed_benchmark_rows != null) $('#benchmark-unindexed-count').textContent = Number(status.unindexed_benchmark_rows).toLocaleString();
+        if (status.indexed_benchmark_rows != null && status.unindexed_benchmark_rows != null) {
+          const indexed = Number(status.indexed_benchmark_rows);
+          const unindexed = Number(status.unindexed_benchmark_rows);
+          benchmarkRowsReady = indexed > 0 && indexed === unindexed;
+          document.querySelectorAll('[data-operation]').forEach((button) => {
+            button.disabled = busy || !benchmarkRowsReady;
+          });
+        }
+      }
+
+      function updateBenchmarkRun(action, result) {
+        const indexed = action === 'benchmark_indexed';
+        const key = indexed ? 'indexed' : 'unindexed';
+        const prefix = indexed ? 'benchmark-indexed' : 'benchmark-unindexed';
+        const elapsed = Number(result.elapsed_ms);
+        const rows = Number(result.rows_added);
+        if (!Number.isFinite(elapsed) || !Number.isFinite(rows) || rows < 1) return;
+        benchmarkRuns[key] = { elapsed, rows };
+        $(`#${prefix}-label`).textContent = `${rows.toLocaleString()} rows`;
+        $(`#${prefix}-time`).textContent = formatDuration(elapsed);
+        const rate = elapsed > 0 ? rows * 1000 / elapsed : Infinity;
+        $(`#${prefix}-rate`).textContent = `${Number.isFinite(rate) ? Math.round(rate).toLocaleString() : '∞'} rows/s`;
+
+        const indexedRun = benchmarkRuns.indexed;
+        const unindexedRun = benchmarkRuns.unindexed;
+        if (!indexedRun || !unindexedRun) {
+          $('#benchmark-note').textContent = 'Run both with the same batch size to compare per-row insert time. Timing includes native client startup, the SQL statement, and clean shutdown.';
+          return;
+        }
+        const ratio = (indexedRun.elapsed / indexedRun.rows) / (unindexedRun.elapsed / unindexedRun.rows);
+        const difference = Math.abs(ratio - 1) * 100;
+        if (difference < 3) {
+          $('#benchmark-note').textContent = `Near parity: indexed inserts were ${difference.toFixed(1)}% ${ratio >= 1 ? 'slower' : 'faster'} per row in the latest runs. Index maintenance adds write work; repeat equal-size batches to see the local trend.`;
+        } else if (ratio >= 1) {
+          $('#benchmark-note').textContent = `Index maintenance added ${difference.toFixed(1)}% insert time per row in the latest runs.`;
+        } else {
+          $('#benchmark-note').textContent = `Indexed inserts used ${difference.toFixed(1)}% less time per row in the latest runs.`;
+        }
+      }
+
+      function resetBenchmarkResults(note = 'Run both with the same batch size to compare per-row insert time. Timing includes native client startup, the SQL statement, and clean shutdown.') {
+        ['indexed', 'unindexed'].forEach((side) => {
+          benchmarkRuns[side] = null;
+          const prefix = `benchmark-${side}`;
+          $(`#${prefix}-label`).textContent = 'Not run';
+          $(`#${prefix}-time`).textContent = '—';
+          $(`#${prefix}-rate`).textContent = '— rows/s';
+        });
+        $('#benchmark-note').textContent = note;
+      }
+
+      function resetOperationResults(note = 'For a fair comparison, add the same row batch to both tables above. Reads and DML target the same IDs on both sides.') {
+        Object.keys(operationResults).forEach((operation) => {
+          operationResults[operation] = null;
+          $(`#operation-${operation}-indexed`).textContent = 'Not run';
+          $(`#operation-${operation}-unindexed`).textContent = 'Not run';
+          $(`#operation-${operation}-delta`).textContent = '—';
+        });
+        $('#operation-note').textContent = note;
+      }
+
+      function updateOperationResult(result) {
+        const { operation, indexed_elapsed_ms: indexed, unindexed_elapsed_ms: unindexed, operations } = result;
+        if (!(operation in operationResults) || !Number.isFinite(Number(indexed)) || !Number.isFinite(Number(unindexed))) return;
+        const indexedMs = Number(indexed), unindexedMs = Number(unindexed);
+        $(`#operation-${operation}-indexed`).textContent = formatDuration(indexedMs);
+        $(`#operation-${operation}-unindexed`).textContent = formatDuration(unindexedMs);
+
+        let difference;
+        if (Math.abs(indexedMs - unindexedMs) < 0.01) {
+          difference = 'Near parity';
+        } else if (indexedMs < unindexedMs) {
+          const ratio = indexedMs > 0 ? unindexedMs / indexedMs : Infinity;
+          difference = `LSM ${Number.isFinite(ratio) ? `${ratio.toFixed(2)}× faster` : 'faster'}`;
+        } else {
+          const ratio = unindexedMs > 0 ? indexedMs / unindexedMs : Infinity;
+          difference = `LSM ${Number.isFinite(ratio) ? `${ratio.toFixed(2)}× slower` : 'slower'}`;
+        }
+        $(`#operation-${operation}-delta`).textContent = difference;
+        operationResults[operation] = { indexedMs, unindexedMs, operations };
+        const detail = `${Number(operations).toLocaleString()} matching operations. Times include native client startup and shutdown; ${difference.toLowerCase()} in this run.`;
+        $('#operation-note').textContent = detail;
+      }
+
       function setBusy(value) {
         busy = value;
         $('#run-sql').disabled = value;
         $('#sql').disabled = value;
         $('#rows-to-add').disabled = value;
-        document.querySelectorAll('.action').forEach((button) => button.disabled = value);
+        $('#operations-count').disabled = value;
+        document.querySelectorAll('[data-action]').forEach((button) => button.disabled = value);
+        document.querySelectorAll('[data-operation]').forEach((button) => {
+          button.disabled = value || !benchmarkRowsReady;
+        });
       }
 
       function updateAddLabel() {
@@ -335,8 +515,9 @@
         $('#add-label').textContent = Number.isInteger(rows) && rows > 0 ? `Add ${rows.toLocaleString()}` : 'Add rows';
       }
 
-      function showOutput({ ok, output, error, message }) {
+      function showOutput({ ok, output, error, message, elapsed_ms }) {
         $('#output-wrap').classList.add('visible');
+        $('#output-runtime').textContent = elapsed_ms == null ? '' : `Runtime ${formatDuration(elapsed_ms)}`;
         const status = $('#output-status');
         status.className = `output-status ${ok ? 'success' : 'error'}`;
         status.innerHTML = `<i class="dot" style="${ok ? '' : 'background:#bd5b50;box-shadow:0 0 0 3px #bd5b5020'}"></i>${ok ? 'Success' : 'Error'}`;
@@ -349,6 +530,7 @@
         setBusy(true);
         $('#output-wrap').classList.add('visible');
         $('#output-status').textContent = 'Running…';
+        $('#output-runtime').textContent = '';
         $('#output').textContent = 'Sending statement to Pebble…';
         try {
           const response = await fetch('/api/sql', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ sql }) });
@@ -363,7 +545,8 @@
       async function runWorkload(action) {
         if (busy) return;
         let rows = null;
-        if (action === 'add') {
+        const isInsert = ['add', 'benchmark_indexed', 'benchmark_unindexed'].includes(action);
+        if (isInsert) {
           rows = Number($('#rows-to-add').value);
           if (!Number.isInteger(rows) || rows < 1 || rows > 100000) {
             setToast('Choose a whole number from 1 to 100,000 rows.', true);
@@ -376,16 +559,67 @@
         setBusy(true);
         $('#output-wrap').classList.add('visible');
         $('#output-status').textContent = 'Running workload…';
-        $('#output').textContent = action === 'add' ? `Appending ${rows.toLocaleString()} entries. Live metrics continue updating while Pebble writes the pages…` : 'Executing against the demo table…';
+        $('#output-runtime').textContent = '';
+        const target = action === 'benchmark_indexed' ? 'the indexed benchmark table' : action === 'benchmark_unindexed' ? 'the unindexed benchmark table' : action === 'clear_benchmark_indexed' ? 'the indexed benchmark table' : action === 'clear_benchmark_unindexed' ? 'the unindexed benchmark table' : action === 'clear_benchmarks' ? 'both benchmark tables' : 'the demo table';
+        $('#output').textContent = isInsert ? `Appending ${rows.toLocaleString()} entries to ${target}. Live metrics continue updating while Pebble writes…` : action.startsWith('clear_') ? `Resetting ${target}…` : 'Executing against the demo table…';
         try {
-          const request = action === 'add' ? { action, rows } : { action };
+          const request = isInsert ? { action, rows } : { action };
           const response = await fetch('/api/workload', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(request) });
           const result = await response.json();
           showOutput(result);
+          updateBenchmarkCounts(result);
           if (!response.ok) setToast(result.error || 'Workload failed', true);
-          else setToast(result.message || 'Workload completed');
+          else {
+            if (action === 'benchmark_indexed' || action === 'benchmark_unindexed') {
+              updateBenchmarkRun(action, result);
+              resetOperationResults('Benchmark rows changed. Add matching batches to both tables before comparing point operations.');
+            }
+            if (action === 'clear_benchmarks') resetBenchmarkResults('Both benchmark tables are empty. Run matching batches to compare per-row insert time.');
+            else if (action === 'clear_benchmark_indexed' || action === 'clear_benchmark_unindexed') resetBenchmarkResults('One table was cleared and timing results were reset. Clear both tables for a clean comparison.');
+            if (action.startsWith('clear_benchmark')) resetOperationResults('Benchmark rows changed. Add matching batches to both tables before comparing point operations.');
+            setToast(result.message || 'Workload completed');
+          }
         } catch (error) { showOutput({ ok: false, error: error.message }); setToast(error.message, true); }
         finally { button.innerHTML = previous; setBusy(false); await refreshStatus(); }
+      }
+
+      async function runOperation(operation) {
+        if (busy) return;
+        const count = Number($('#operations-count').value);
+        if (!Number.isInteger(count) || count < 1 || count > 200) {
+          setToast('Choose a whole number from 1 to 200 operations.', true);
+          return;
+        }
+        const button = document.querySelector(`[data-operation="${operation}"]`);
+        const previous = button.innerHTML;
+        button.innerHTML = '<span class="action-icon"><span class="spinner"></span></span><span><strong>Comparing…</strong><small>Running matching operations</small></span>';
+        setBusy(true);
+        $('#output-wrap').classList.add('visible');
+        $('#output-status').textContent = 'Running comparison…';
+        $('#output-runtime').textContent = '';
+        $('#output').textContent = `Running ${count.toLocaleString()} matching ${operation} operations against both tables…`;
+        try {
+          const response = await fetch('/api/compare', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ operation, operations: count }),
+          });
+          const result = await response.json();
+          showOutput({ ...result, ok: result.ok ?? response.ok });
+          updateBenchmarkCounts(result);
+          if (!response.ok) setToast(result.error || 'Comparison failed', true);
+          else {
+            updateOperationResult(result);
+            setToast(result.message || 'Comparison completed');
+          }
+        } catch (error) {
+          showOutput({ ok: false, error: error.message });
+          setToast(error.message, true);
+        } finally {
+          button.innerHTML = previous;
+          setBusy(false);
+          await refreshStatus();
+        }
       }
 
       function applyTheme(theme) {
@@ -413,7 +647,8 @@
         if ((event.metaKey || event.ctrlKey) && event.key === 'Enter') { event.preventDefault(); runSQL(); }
         if (event.key === 'Tab') { event.preventDefault(); const start = event.target.selectionStart, end = event.target.selectionEnd; event.target.setRangeText('  ', start, end, 'end'); }
       });
-      document.querySelectorAll('.action').forEach((button) => button.addEventListener('click', () => runWorkload(button.dataset.action)));
+      document.querySelectorAll('[data-action]').forEach((button) => button.addEventListener('click', () => runWorkload(button.dataset.action)));
+      document.querySelectorAll('[data-operation]').forEach((button) => button.addEventListener('click', () => runOperation(button.dataset.operation)));
       window.addEventListener('resize', drawChart);
       try { applyTheme(localStorage.getItem('pebble-studio-theme') || 'light'); } catch (_) { applyTheme('light'); }
       updateAddLabel();

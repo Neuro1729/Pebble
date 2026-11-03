@@ -13,6 +13,7 @@ import shutil
 import subprocess
 import sys
 import threading
+import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import urlparse
@@ -31,13 +32,18 @@ DBMS = configured_path("PEBBLE_DBMS", ROOT / "build/debug/bin/dbms")
 DATABASE = configured_path("PEBBLE_STUDIO_DB", ROOT / "data/presenter.db")
 PAGE = ROOT / "web/studio.html"
 DEMO_TABLE = "demo_entries"
+INDEXED_BENCHMARK_TABLE = "lsm_bench_indexed"
+UNINDEXED_BENCHMARK_TABLE = "lsm_bench_unindexed"
 WORKLOAD_SIZE = 10_000
+COMPARE_OPERATION_LIMIT = 200
 SQL_LOCK = threading.RLock()
+COMPARE_INDEXED_FIRST = True
 
 
 def run_sql(sql: str, timeout: int = 300) -> dict[str, object]:
     """Run SQL through the project's existing native client."""
     with SQL_LOCK:
+        started = time.perf_counter()
         result = subprocess.run(
             [str(DBMS), "--database", str(DATABASE), "--table"],
             cwd=ROOT,
@@ -47,10 +53,12 @@ def run_sql(sql: str, timeout: int = 300) -> dict[str, object]:
             timeout=timeout,
             check=False,
         )
+        elapsed_ms = (time.perf_counter() - started) * 1000
     return {
         "ok": result.returncode == 0,
         "output": result.stdout.strip(),
         "error": result.stderr.strip(),
+        "elapsed_ms": round(elapsed_ms, 3),
     }
 
 
@@ -65,9 +73,22 @@ def ensure_demo_table() -> None:
     if not index["ok"] and "index already exists" not in str(index["error"]):
         raise RuntimeError(str(index["error"] or index["output"]))
 
+    for table_name in (INDEXED_BENCHMARK_TABLE, UNINDEXED_BENCHMARK_TABLE):
+        table = run_sql(
+            f"CREATE TABLE {table_name} (id INTEGER, label VARCHAR, score INTEGER)"
+        )
+        if not table["ok"] and "table already exists" not in str(table["error"]):
+            raise RuntimeError(str(table["error"] or table["output"]))
 
-def get_row_count() -> int:
-    result = run_sql(f"SELECT COUNT(*) FROM {DEMO_TABLE}")
+    index = run_sql(
+        f"CREATE INDEX {INDEXED_BENCHMARK_TABLE}_id ON {INDEXED_BENCHMARK_TABLE} (id)"
+    )
+    if not index["ok"] and "index already exists" not in str(index["error"]):
+        raise RuntimeError(str(index["error"] or index["output"]))
+
+
+def get_row_count(table_name: str = DEMO_TABLE) -> int:
+    result = run_sql(f"SELECT COUNT(*) FROM {table_name}")
     if not result["ok"]:
         raise RuntimeError(str(result["error"] or "Could not read workload table"))
     match = re.search(r"\b(\d+)\b", str(result["output"]))
@@ -76,8 +97,8 @@ def get_row_count() -> int:
     return int(match.group(1))
 
 
-def get_max_id() -> int | None:
-    result = run_sql(f"SELECT MAX(id) FROM {DEMO_TABLE}")
+def get_max_id(table_name: str = DEMO_TABLE) -> int | None:
+    result = run_sql(f"SELECT MAX(id) FROM {table_name}")
     if not result["ok"]:
         raise RuntimeError(str(result["error"] or "Could not read the next demo row ID"))
     match = re.search(r"^\|\s*(NULL|-?\d+)\s*\|$", str(result["output"]), re.MULTILINE)
@@ -355,13 +376,20 @@ class StudioHandler(BaseHTTPRequestHandler):
             self.send_json(200, METRICS.snapshot())
         elif path == "/api/status":
             try:
-                self.send_json(200, {"database": str(DATABASE), "table": DEMO_TABLE, "rows": get_row_count()})
+                self.send_json(200, {
+                    "database": str(DATABASE),
+                    "table": DEMO_TABLE,
+                    "rows": get_row_count(),
+                    "indexed_benchmark_rows": get_row_count(INDEXED_BENCHMARK_TABLE),
+                    "unindexed_benchmark_rows": get_row_count(UNINDEXED_BENCHMARK_TABLE),
+                })
             except (OSError, subprocess.TimeoutExpired, RuntimeError) as error:
                 self.send_json(500, {"error": str(error)})
         else:
             self.send_error(404, "Not found")
 
     def do_POST(self) -> None:  # noqa: N802 - stdlib HTTP handler API
+        global COMPARE_INDEXED_FIRST
         path = urlparse(self.path).path
         try:
             length = int(self.headers.get("Content-Length", "0"))
@@ -390,12 +418,95 @@ class StudioHandler(BaseHTTPRequestHandler):
                 self.send_json(500, {"error": str(error)})
             return
 
+        if path == "/api/compare":
+            operation = payload.get("operation")
+            operations = payload.get("operations", 25)
+            if operation not in ("read", "update", "delete"):
+                self.send_json(400, {"error": "Choose read, update, or delete."})
+                return
+            if isinstance(operations, bool) or not isinstance(operations, int):
+                self.send_json(400, {"error": "Operations must be a whole number."})
+                return
+            if operations < 1 or operations > COMPARE_OPERATION_LIMIT:
+                self.send_json(400, {"error": f"Choose between 1 and {COMPARE_OPERATION_LIMIT} operations."})
+                return
+
+            try:
+                with SQL_LOCK:
+                    indexed_rows = get_row_count(INDEXED_BENCHMARK_TABLE)
+                    unindexed_rows = get_row_count(UNINDEXED_BENCHMARK_TABLE)
+                    if indexed_rows == 0 or unindexed_rows == 0:
+                        self.send_json(409, {"error": "Add rows to both benchmark tables first."})
+                        return
+                    if indexed_rows != unindexed_rows:
+                        self.send_json(409, {"error": "The benchmark tables have different row counts. Clear both tables, then add the same batch to each."})
+                        return
+
+                    indexed_max = get_max_id(INDEXED_BENCHMARK_TABLE)
+                    unindexed_max = get_max_id(UNINDEXED_BENCHMARK_TABLE)
+                    if indexed_max is None or indexed_max != unindexed_max or indexed_max != indexed_rows:
+                        self.send_json(409, {"error": "The benchmark rows are not aligned. Clear both tables, then add the same batch to each."})
+                        return
+
+                    operation_count = min(operations, indexed_rows)
+                    first_id = indexed_max - operation_count + 1
+                    ids = range(first_id, indexed_max + 1)
+
+                    def statements(table_name: str) -> str:
+                        if operation == "read":
+                            sql = [f"SELECT id FROM {table_name} WHERE id = {row_id}" for row_id in ids]
+                        elif operation == "update":
+                            sql = [f"UPDATE {table_name} SET score = 9001 WHERE id = {row_id}" for row_id in ids]
+                        else:
+                            sql = [f"DELETE FROM {table_name} WHERE id = {row_id}" for row_id in ids]
+                        return ";\n".join(sql) + ";"
+
+                    indexed_sql = statements(INDEXED_BENCHMARK_TABLE)
+                    unindexed_sql = statements(UNINDEXED_BENCHMARK_TABLE)
+                    order = (
+                        ("indexed", INDEXED_BENCHMARK_TABLE, indexed_sql),
+                        ("unindexed", UNINDEXED_BENCHMARK_TABLE, unindexed_sql),
+                    )
+                    if not COMPARE_INDEXED_FIRST:
+                        order = tuple(reversed(order))
+                    COMPARE_INDEXED_FIRST = not COMPARE_INDEXED_FIRST
+                    timings: dict[str, float] = {}
+                    for label, _table_name, sql in order:
+                        result = run_sql(sql, timeout=600)
+                        if not result["ok"]:
+                            self.send_json(400, result)
+                            return
+                        timings[label] = float(result["elapsed_ms"])
+
+                    noun = {"read": "point reads", "update": "point updates", "delete": "point deletes"}[operation]
+                    self.send_json(200, {
+                        "ok": True,
+                        "operation": operation,
+                        "operations": operation_count,
+                        "message": f"Compared {operation_count:,} matching {noun} on both tables.",
+                        "output": f"Indexed: {timings['indexed']:.2f} ms\nUnindexed: {timings['unindexed']:.2f} ms",
+                        "indexed_elapsed_ms": timings["indexed"],
+                        "unindexed_elapsed_ms": timings["unindexed"],
+                        "elapsed_ms": timings["indexed"] + timings["unindexed"],
+                        "indexed_benchmark_rows": get_row_count(INDEXED_BENCHMARK_TABLE),
+                        "unindexed_benchmark_rows": get_row_count(UNINDEXED_BENCHMARK_TABLE),
+                    })
+            except (OSError, subprocess.TimeoutExpired, RuntimeError) as error:
+                self.send_json(500, {"error": str(error)})
+            return
+
         if path == "/api/workload":
             action = payload.get("action")
             try:
                 with SQL_LOCK:
                     current_rows = get_row_count()
-                    if action == "add":
+                    if action in ("add", "benchmark_indexed", "benchmark_unindexed"):
+                        if action == "benchmark_indexed":
+                            table_name = INDEXED_BENCHMARK_TABLE
+                        elif action == "benchmark_unindexed":
+                            table_name = UNINDEXED_BENCHMARK_TABLE
+                        else:
+                            table_name = DEMO_TABLE
                         requested_rows = payload.get("rows", WORKLOAD_SIZE)
                         if isinstance(requested_rows, bool) or not isinstance(requested_rows, int):
                             self.send_json(400, {"error": "Rows to add must be a whole number."})
@@ -403,7 +514,7 @@ class StudioHandler(BaseHTTPRequestHandler):
                         if requested_rows < 1 or requested_rows > 100_000:
                             self.send_json(400, {"error": "Choose between 1 and 100,000 rows per add."})
                             return
-                        maximum_id = get_max_id()
+                        maximum_id = get_max_id(table_name)
                         first_id = 1 if maximum_id is None else maximum_id + 1
                         last_id = first_id + requested_rows - 1
                         if last_id > 2_147_483_647:
@@ -413,8 +524,39 @@ class StudioHandler(BaseHTTPRequestHandler):
                             f"({row_id}, 'Pebble row {row_id:05d}', {row_id % 1000})"
                             for row_id in range(first_id, last_id + 1)
                         )
-                        sql = f"INSERT INTO {DEMO_TABLE} VALUES {rows}"
-                        message = f"Added {requested_rows:,} entries to {DEMO_TABLE} (IDs {first_id:,}–{last_id:,})."
+                        sql = f"INSERT INTO {table_name} VALUES {rows}"
+                        if action == "benchmark_indexed":
+                            mode = "with the LSM index"
+                        elif action == "benchmark_unindexed":
+                            mode = "without an index"
+                        else:
+                            mode = "to the demo table"
+                        message = f"Added {requested_rows:,} entries {mode} in {table_name} (IDs {first_id:,}–{last_id:,})."
+                    elif action in ("clear_benchmark_indexed", "clear_benchmark_unindexed", "clear_benchmarks"):
+                        reset_indexed = action in ("clear_benchmark_indexed", "clear_benchmarks")
+                        reset_unindexed = action in ("clear_benchmark_unindexed", "clear_benchmarks")
+                        removed_indexed = get_row_count(INDEXED_BENCHMARK_TABLE) if reset_indexed else 0
+                        removed_unindexed = get_row_count(UNINDEXED_BENCHMARK_TABLE) if reset_unindexed else 0
+                        statements = []
+                        if reset_indexed:
+                            statements.extend([
+                                f"DROP TABLE {INDEXED_BENCHMARK_TABLE}",
+                                f"CREATE TABLE {INDEXED_BENCHMARK_TABLE} (id INTEGER, label VARCHAR, score INTEGER)",
+                                f"CREATE INDEX {INDEXED_BENCHMARK_TABLE}_id ON {INDEXED_BENCHMARK_TABLE} (id)",
+                            ])
+                        if reset_unindexed:
+                            statements.extend([
+                                f"DROP TABLE {UNINDEXED_BENCHMARK_TABLE}",
+                                f"CREATE TABLE {UNINDEXED_BENCHMARK_TABLE} (id INTEGER, label VARCHAR, score INTEGER)",
+                            ])
+                        sql = ";\n".join(statements) + ";"
+                        removed_total = removed_indexed + removed_unindexed
+                        if action == "clear_benchmarks":
+                            message = f"Reset both benchmark tables and removed {removed_total:,} rows."
+                        elif reset_indexed:
+                            message = f"Reset the indexed benchmark table and removed {removed_indexed:,} rows."
+                        else:
+                            message = f"Reset the unindexed benchmark table and removed {removed_unindexed:,} rows."
                     elif action == "update":
                         if not current_rows:
                             self.send_json(409, {"error": "There are no demo rows to update. Add some rows first."})
@@ -435,7 +577,16 @@ class StudioHandler(BaseHTTPRequestHandler):
                     if not result["ok"]:
                         self.send_json(400, result)
                         return
-                    self.send_json(200, {"ok": True, "output": result["output"], "message": message, "rows": get_row_count()})
+                    self.send_json(200, {
+                        "ok": True,
+                        "output": result["output"],
+                        "message": message,
+                        "elapsed_ms": result["elapsed_ms"],
+                        "rows_added": requested_rows if action in ("add", "benchmark_indexed", "benchmark_unindexed") else None,
+                        "rows": get_row_count(),
+                        "indexed_benchmark_rows": get_row_count(INDEXED_BENCHMARK_TABLE),
+                        "unindexed_benchmark_rows": get_row_count(UNINDEXED_BENCHMARK_TABLE),
+                    })
             except (OSError, subprocess.TimeoutExpired, RuntimeError) as error:
                 self.send_json(500, {"error": str(error)})
             return
